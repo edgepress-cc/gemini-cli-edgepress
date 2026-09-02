@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# ep — thin curl wrapper for the EdgePress tenant API.
+#
+# Usage:
+#   ep GET /posts?limit=10
+#   ep POST /posts '{"title":"X","status":"draft"}'
+#   ep PATCH /posts/42 '{"status":"published"}'
+#   ep DELETE /posts/42
+#   ep --raw GET /openapi.json | jq '.paths | keys[]'
+#   ep --endpoint GET /posts       # print resolved URL, don't execute
+#
+# Requires env: EDGEPRESS_TENANT (e.g. blog.edgepress.cc), EDGEPRESS_TOKEN (epat_...).
+
+set -u
+
+RAW=0; DRY=0
+while [[ "${1:-}" == --* ]]; do
+  case "$1" in
+    --raw) RAW=1; shift;;
+    --endpoint) DRY=1; shift;;
+    *) echo "unknown flag: $1" >&2; exit 2;;
+  esac
+done
+
+METHOD="${1:-}"; PATH_="${2:-}"; BODY="${3:-}"
+if [[ -z "$METHOD" || -z "$PATH_" ]]; then
+  echo "usage: ep [--raw|--endpoint] METHOD /path [json-body]" >&2
+  exit 2
+fi
+if [[ -z "${EDGEPRESS_TENANT:-}" ]]; then
+  echo "EDGEPRESS_TENANT not set — run /edgepress:setup" >&2
+  exit 3
+fi
+if [[ -z "${EDGEPRESS_TOKEN:-}" ]]; then
+  echo "EDGEPRESS_TOKEN not set — run /edgepress:setup" >&2
+  exit 3
+fi
+
+URL="https://${EDGEPRESS_TENANT}/api/v1${PATH_}"
+
+if [[ $DRY -eq 1 ]]; then
+  echo "$METHOD $URL"
+  exit 0
+fi
+
+CURL_ARGS=(-sS -X "$METHOD" -H "Authorization: Bearer $EDGEPRESS_TOKEN")
+if [[ -n "$BODY" ]]; then
+  CURL_ARGS+=(-H 'Content-Type: application/json' -d "$BODY")
+fi
+
+RESP=$(curl "${CURL_ARGS[@]}" -w '\n__HTTP_STATUS__%{http_code}' "$URL")
+STATUS="${RESP##*__HTTP_STATUS__}"
+BODY_OUT="${RESP%__HTTP_STATUS__*}"
+
+if [[ "$STATUS" -ge 400 ]]; then
+  printf '\033[31mHTTP %s\033[0m %s\n' "$STATUS" "$METHOD $URL" >&2
+  echo "$BODY_OUT" >&2
+  exit 1
+fi
+
+if [[ $RAW -eq 1 ]] || ! command -v jq >/dev/null; then
+  printf '%s' "$BODY_OUT"
+else
+  printf '%s' "$BODY_OUT" | jq
+fi

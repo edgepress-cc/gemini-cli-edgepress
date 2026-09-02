@@ -1,0 +1,17 @@
+{
+  "name": "edgepress",
+  "version": "0.1.0",
+  "description": "Author, publish, and manage EdgePress tenant content via the tenant's /api/v1 REST API from Gemini CLI.",
+  "author": "edgepress-cc",
+  "license": "MIT",
+  "homepage": "https://github.com/edgepress-cc/gemini-cli-edgepress",
+  "skill": "SKILL.md",
+  "commands": [
+    "commands/setup.md",
+    "commands/whoami.md",
+    "commands/doctor.md",
+    "commands/spec.md",
+    "commands/workflow.md"
+  ],
+  "env": ["EDGEPRESS_TENANT", "EDGEPRESS_TOKEN"]
+}
