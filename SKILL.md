@@ -30,6 +30,9 @@ Domains you can operate on:
   `public_signup_enabled`, ...).
 - **API tokens** — PATs. Listing works with a PAT; creating/revoking is
   session-only (admin UI), the plugin cannot do it.
+- **Templates** — page layouts: zones (named regions) holding ordered block
+  instances, draft/published lifecycle, assignment to pages and posts. This is
+  the one domain served by GraphQL (`POST /graphql`), not REST.
 
 Everything below assumes you act on ONE tenant per session — the one named by
 `EDGEPRESS_TENANT`.
@@ -134,6 +137,8 @@ Triggers per domain:
 - Cartoon collections/items → `references/daily-cartoons.md`
 - Site settings keys → `references/settings.md`
 - Anything about tokens/auth → `references/api-tokens.md`
+- Building or editing page layouts — templates, zones, block instances →
+  `references/templates.md`
 
 Simple GETs (list posts, show a page, read settings) don't need a reference
 load — use the quick reference and go.
@@ -229,9 +234,10 @@ user. Do not shadow it by making the same calls yourself while it runs.
 - **Deleting referenced media breaks content.** A post whose
   `featured_image_id` points at deleted media renders broken. Before
   `DELETE /media/:id`, check for references and warn the user.
-- **Block-editor content blocks are out of scope.** Structured block
-  content (Feature C) is edited in the admin UI, not via this skill. If asked,
-  refer the user to `https://<tenant>/admin`.
+- **Templates are GraphQL, not REST.** Templates, zones and block instances
+  live behind `POST /graphql` — see `references/templates.md`. GraphQL answers
+  HTTP 200 even when it fails, so `ep` exits 0: always check the `errors` array.
+  Block content inside a single post/page body is still admin-UI territory.
 - **Partial updates null fields.** See "Never overwrite" above — always
   GET → merge → PUT for content resources.
 
@@ -370,6 +376,23 @@ DELETE /api-tokens/:id    403 session_required — admin UI only
 You can audit tokens but never mint or revoke them. Refer the user to
 `https://<tenant>/admin/settings/api-tokens`.
 
+### Templates (GraphQL)
+
+```
+GET  /blocks                 block catalogue
+GET  /blocks/:type/schema    settings a block type accepts
+POST /graphql                templates, zones, block instances — the only non-REST domain
+```
+
+```bash
+ep POST /graphql '{"query":"query { templates { id name slug status } }"}'
+```
+
+Flow: `createTemplate` → `createZone` → `createBlockInstance` →
+`reorderBlockInstances` → `publishTemplate` → `assignTemplateToPage`.
+HTTP is always 200 — check `errors`. Load `references/templates.md` before
+writing any mutation.
+
 ## Reference index
 
 Load one of these before generating code for its domain:
@@ -385,6 +408,7 @@ Load one of these before generating code for its domain:
 | Daily cartoons | `references/daily-cartoons.md` | collections + items (ordered) |
 | Settings | `references/settings.md` | key-value store, public_signup_enabled, site_title |
 | API tokens | `references/api-tokens.md` | list works via PAT; POST/DELETE need session — refer to admin UI |
+| Templates | `references/templates.md` | page layouts via `POST /graphql`: templates, zones, block instances, publish, assignment |
 
 ## Session output style
 
