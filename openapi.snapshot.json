@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgePress Tenant API",
-    "version": "1.1.0",
+    "version": "1.4.0",
     "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`."
   },
   "servers": [
@@ -332,6 +332,712 @@
               "type": "object",
               "additionalProperties": true
             }
+          }
+        }
+      },
+      "Template": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "PAGE",
+              "POST",
+              "ARCHIVE",
+              "HOME",
+              "ERROR",
+              "CUSTOM"
+            ]
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "isBaseLayout": {
+            "type": "boolean"
+          },
+          "parentTemplateId": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          },
+          "thumbnail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "config": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "`draft` or `published`"
+          },
+          "publishedVersion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "JSON snapshot of the template row taken at publish time"
+          },
+          "publishedAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix epoch seconds"
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "createdBy": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "Zone": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "templateId": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "maxBlocks": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "orderIndex": {
+            "type": "integer"
+          },
+          "config": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "BlockInstance": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "templateId": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          },
+          "pageId": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          },
+          "postId": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          },
+          "zoneSlug": {
+            "type": "string"
+          },
+          "blockType": {
+            "type": "string",
+            "description": "One of the types listed by GET /api/blocks"
+          },
+          "orderIndex": {
+            "type": "integer"
+          },
+          "config": {
+            "type": "object"
+          },
+          "visibility": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "createdBy": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "CreateTemplateRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string",
+            "description": "Optional; generated from `name` when omitted. Must be unique across templates (409 on duplicate)."
+          },
+          "description": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "PAGE",
+              "POST",
+              "ARCHIVE",
+              "HOME",
+              "ERROR",
+              "CUSTOM"
+            ]
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "true unsets any other default template of the same type"
+          },
+          "isBaseLayout": {
+            "type": "boolean"
+          },
+          "parentTemplateId": {
+            "type": "string"
+          },
+          "thumbnail": {
+            "type": "string"
+          },
+          "config": {
+            "type": "object"
+          }
+        }
+      },
+      "UpdateTemplateRequest": {
+        "type": "object",
+        "description": "All fields optional; only supplied fields are updated.",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string",
+            "description": "Must stay unique across templates (409 on duplicate)"
+          },
+          "description": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "PAGE",
+              "POST",
+              "ARCHIVE",
+              "HOME",
+              "ERROR",
+              "CUSTOM"
+            ]
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "isBaseLayout": {
+            "type": "boolean"
+          },
+          "parentTemplateId": {
+            "type": "string"
+          },
+          "thumbnail": {
+            "type": "string"
+          },
+          "config": {
+            "type": "object"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateZoneRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string",
+            "description": "Optional; generated from `name` when omitted. Must be unique within the template (409 on duplicate)."
+          },
+          "description": {
+            "type": "string"
+          },
+          "maxBlocks": {
+            "type": "integer"
+          },
+          "orderIndex": {
+            "type": "integer",
+            "description": "Defaults to 0"
+          },
+          "config": {
+            "type": "object"
+          }
+        }
+      },
+      "UpdateZoneRequest": {
+        "type": "object",
+        "description": "All fields optional; only supplied fields are updated.",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string",
+            "description": "Must stay unique within the template (409 on duplicate)"
+          },
+          "description": {
+            "type": "string"
+          },
+          "maxBlocks": {
+            "type": "integer"
+          },
+          "orderIndex": {
+            "type": "integer"
+          },
+          "config": {
+            "type": "object"
+          }
+        }
+      },
+      "CreateBlockRequest": {
+        "type": "object",
+        "required": [
+          "zoneSlug",
+          "blockType",
+          "config"
+        ],
+        "properties": {
+          "zoneSlug": {
+            "type": "string"
+          },
+          "blockType": {
+            "type": "string",
+            "description": "Must exist in GET /api/blocks (404 otherwise)"
+          },
+          "orderIndex": {
+            "type": "integer"
+          },
+          "config": {
+            "type": "object",
+            "description": "Validated against the block type's JSON Schema; violations return 400 with `validationErrors`"
+          },
+          "visibility": {
+            "type": "object"
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PatchBlockRequest": {
+        "type": "object",
+        "description": "All fields optional; only supplied fields are updated. `config` keys are shallow-MERGED into the stored config, not a replacement.",
+        "properties": {
+          "zoneSlug": {
+            "type": "string"
+          },
+          "blockType": {
+            "type": "string"
+          },
+          "orderIndex": {
+            "type": "integer"
+          },
+          "config": {
+            "type": "object",
+            "description": "Top-level keys merged into the stored config; the merged result is re-validated against the block type's JSON Schema"
+          },
+          "visibility": {
+            "type": "object"
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ReorderRequest": {
+        "type": "object",
+        "description": "Array order becomes orderIndex 0..n. Pass `zoneIds` when reordering zones, `blockIds` when reordering blocks.",
+        "properties": {
+          "zoneIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "blockIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AssignTemplateRequest": {
+        "type": "object",
+        "required": [
+          "templateId"
+        ],
+        "properties": {
+          "templateId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Template id to assign, or `null` to unassign (removes the page's template)."
+          }
+        }
+      },
+      "StoreCategory": {
+        "type": "object",
+        "description": "A store catalogue category. Categories form a tree via parent_id; deleting a parent detaches its children (parent_id becomes null).",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "store_id": {
+            "type": "integer"
+          },
+          "parent_id": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seo_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seo_description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "is_visible": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ]
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "StoreProduct": {
+        "type": "object",
+        "description": "A store catalogue product. price and compare_at_price are integer minor units in the product currency (1999 = 19.99). Category membership is stored in a join table; the single-product GET returns it as `categories`, an array of category ids.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "store_id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "short_description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "product_type": {
+            "type": "string",
+            "enum": [
+              "physical",
+              "digital",
+              "service",
+              "affiliate"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "active",
+              "archived"
+            ]
+          },
+          "price": {
+            "type": "integer",
+            "description": "Integer minor units. Never a float."
+          },
+          "compare_at_price": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Integer minor units, or null."
+          },
+          "currency": {
+            "type": "string",
+            "description": "Always a 3-letter uppercase ISO 4217 code."
+          },
+          "images": {
+            "type": "string",
+            "description": "JSON array of image URLs, as a string."
+          },
+          "seo_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "seo_description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "visible": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ]
+          },
+          "featured": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ]
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "StoreSettings": {
+        "type": "object",
+        "description": "The store's configuration: exactly these 15 fields, nothing else (id, slug and user_id are never exposed here). The tax fields (tax_enabled, tax_rate, tax_inclusive) and the analytics ids (google_analytics_id, facebook_pixel_id) are STORED but not yet applied: tax is applied at checkout in slices 3–4 and analytics are emitted by the storefront in slice 6 — do not report them as live behaviour.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "1-60 characters."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "logo_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "favicon_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "description": "3-letter uppercase ISO 4217 code."
+          },
+          "locale": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tax_enabled": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ],
+            "description": "Stored only in this release; tax is applied at checkout (slices 3-4)."
+          },
+          "tax_rate": {
+            "type": "number",
+            "description": "Percentage, 0-100. Stored only in this release; applied at checkout (slices 3-4)."
+          },
+          "tax_inclusive": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ],
+            "description": "Stored only in this release; applied at checkout (slices 3-4)."
+          },
+          "google_analytics_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stored only in this release; emitted by the storefront in slice 6."
+          },
+          "facebook_pixel_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stored only in this release; emitted by the storefront in slice 6."
           }
         }
       }
@@ -6351,14 +7057,24 @@
           "Users"
         ],
         "summary": "GET /api/users/me",
-        "description": "The caller's own user row (never includes credential columns), plus `readOnly` — true when authenticating with a read-only PAT — and `authMethod` (`pat` or `session`). Use it as the first call of a session to learn your role and whether the token may write.",
+        "description": "The caller's own user row (never includes credential columns), plus `readOnly` — true when authenticating with a read-only PAT — and `authMethod` (`pat` or `session`). Use it as the first call of a session to learn your role and whether the token may write. Both products serve this call under /api/v1 (GET /api/v1/users/me) and answer with `product`, so one request identifies any tenant; this bare /api path is CMS-only.",
         "responses": {
           "200": {
             "description": "The authenticated user",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "type": "object",
+                  "properties": {
+                    "product": {
+                      "type": "string",
+                      "enum": [
+                        "cms",
+                        "store"
+                      ],
+                      "description": "Which EdgePress product this tenant runs: \"cms\" (absent also means cms) or \"store\"."
+                    }
+                  }
                 }
               }
             }
@@ -7269,6 +7985,2949 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/templates": {
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "GET /api/templates",
+        "description": "List templates, default templates first then newest first. REST façade over the GraphQL `templates` query.",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PAGE",
+                "POST",
+                "ARCHIVE",
+                "HOME",
+                "ERROR",
+                "CUSTOM"
+              ]
+            },
+            "description": "Filter by template type (case-insensitive)"
+          },
+          {
+            "name": "isBaseLayout",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Filter by base-layout flag"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "templates": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Template"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "POST /api/templates",
+        "description": "Create a template. Requires role editor or above; a lower-privileged token gets 403. Slug is generated from the name when omitted; a duplicate slug returns 409.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTemplateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "template": {
+                      "$ref": "#/components/schemas/Template"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — a required field (`name`, `type`) is missing, or a field is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above. Read-only tokens and tokens for lower-privileged users are refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A template with that slug already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/templates/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "GET /api/templates/{id}",
+        "description": "Fetch one template with its `zones` inlined, and each zone's `blocks` inlined too (REST has no field selection).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "template": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/Template"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "zones": {
+                              "type": "array",
+                              "items": {
+                                "allOf": [
+                                  {
+                                    "$ref": "#/components/schemas/Zone"
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "blocks": {
+                                        "type": "array",
+                                        "items": {
+                                          "$ref": "#/components/schemas/BlockInstance"
+                                        }
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "404": {
+            "description": "Template not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "PATCH /api/templates/{id}",
+        "description": "Update a template; only the supplied fields change. Requires role editor or above; a lower-privileged token gets 403. Changing the slug to one already in use returns 409.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTemplateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "template": {
+                      "$ref": "#/components/schemas/Template"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above. Read-only tokens and tokens for lower-privileged users are refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Template not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A template with that slug already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "DELETE /api/templates/{id}",
+        "description": "Delete a template. Requires role editor or above; a lower-privileged token gets 403. Unlike zone and block deletes, this is NOT idempotent: an unknown id returns 404, and a default template cannot be deleted (set another template as default first).",
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above. Read-only tokens and tokens for lower-privileged users are refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Template not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The template is the default for its type; set another template as default first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/templates/{id}/publish": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "Templates"
+        ],
+        "summary": "POST /api/templates/{id}/publish",
+        "description": "Publish the template: sets status to `published`, stamps `publishedAt`, and snapshots the template row into `publishedVersion`. The commit point of the build chain. Requires role editor or above; a lower-privileged token gets 403.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "template": {
+                      "$ref": "#/components/schemas/Template"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above. Read-only tokens and tokens for lower-privileged users are refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Template not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/templates/{id}/zones": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Zones"
+        ],
+        "summary": "GET /api/templates/{id}/zones",
+        "description": "List the template's zones, ordered by orderIndex.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "zones": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Zone"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "404": {
+            "description": "Template not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Zones"
+        ],
+        "summary": "POST /api/templates/{id}/zones",
+        "description": "Create a zone in this template. Requires role editor or above; a lower-privileged token gets 403. `templateId` comes from the path — a templateId in the body is ignored. Slug is generated from the name when omitted; a slug already used in this template returns 409.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateZoneRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "zone": {
+                      "$ref": "#/components/schemas/Zone"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above. Read-only tokens and tokens for lower-privileged users are refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A zone with that slug already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/templates/{id}/zones/reorder": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "Zones"
+        ],
+        "summary": "POST /api/templates/{id}/zones/reorder",
+        "description": "Reorder the template's zones: body `{\"zoneIds\": [...]}`; array order becomes orderIndex 0..n. Ids not belonging to this template are ignored. Returns the template's zones in their new order. Requires role editor or above; a lower-privileged token gets 403.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "zones": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Zone"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "zoneIds must be an array of zone ids",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above. Read-only tokens and tokens for lower-privileged users are refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/zones/{zoneId}": {
+      "parameters": [
+        {
+          "name": "zoneId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Zones"
+        ],
+        "summary": "GET /api/zones/{zoneId}",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "zone": {
+                      "$ref": "#/components/schemas/Zone"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "404": {
+            "description": "Zone not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Zones"
+        ],
+        "summary": "PATCH /api/zones/{zoneId}",
+        "description": "Update a zone; only the supplied fields change. Requires role editor or above; a lower-privileged token gets 403. Changing the slug to one already used in the same template returns 409.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateZoneRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "zone": {
+                      "$ref": "#/components/schemas/Zone"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above. Read-only tokens and tokens for lower-privileged users are refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Zone not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A zone with that slug already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Zones"
+        ],
+        "summary": "DELETE /api/zones/{zoneId}",
+        "description": "Delete a zone and every block in it (prevents orphan data). Requires role editor or above; a lower-privileged token gets 403. Idempotent: an unknown id still returns 204, not 404.",
+        "responses": {
+          "204": {
+            "description": "Deleted (or already absent — deletes are idempotent)"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above. Read-only tokens and tokens for lower-privileged users are refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/templates/{id}/blocks": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Blocks"
+        ],
+        "summary": "GET /api/templates/{id}/blocks",
+        "description": "List the template's block instances. `?zone=<slug>` filters to one zone.",
+        "parameters": [
+          {
+            "name": "zone",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filter to blocks in this zone slug"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BlockInstance"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "404": {
+            "description": "Template not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Blocks"
+        ],
+        "summary": "POST /api/templates/{id}/blocks",
+        "description": "Add a block instance to a zone of this template. Requires role editor or above; a lower-privileged token gets 403. `templateId` comes from the path — a templateId in the body is ignored. `config` is validated against the block type's JSON Schema; a violation returns 400 with `validationErrors`. An unknown `blockType` returns 404.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBlockRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "block": {
+                      "$ref": "#/components/schemas/BlockInstance"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid block config: the merged/submitted config violates the block type's JSON Schema. Body carries `validationErrors`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "validationErrors": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above. Read-only tokens and tokens for lower-privileged users are refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Block type not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/blocks/{blockId}": {
+      "parameters": [
+        {
+          "name": "blockId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "patch": {
+        "tags": [
+          "Blocks"
+        ],
+        "summary": "PATCH /api/blocks/{blockId}",
+        "description": "Update a block instance; only the supplied fields change. Requires role editor or above; a lower-privileged token gets 403. `config` is MERGED into the stored config — incoming top-level keys overwrite or add to what is stored, and keys you omit are kept. This deliberately diverges from the GraphQL `updateBlockInstance` mutation, which REPLACES the whole config object. The merge is SHALLOW (top-level keys only): a nested object you pass replaces the entire stored nested object at that key. The merged result is re-validated against the block type's JSON Schema; a violation returns 400 with `validationErrors`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchBlockRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "block": {
+                      "$ref": "#/components/schemas/BlockInstance"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid block config: the merged/submitted config violates the block type's JSON Schema. Body carries `validationErrors`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "validationErrors": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above. Read-only tokens and tokens for lower-privileged users are refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Block not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Blocks"
+        ],
+        "summary": "DELETE /api/blocks/{blockId}",
+        "description": "Delete a block instance. Requires role editor or above; a lower-privileged token gets 403. Idempotent, matching zone deletes: an unknown id still returns 204, not 404.",
+        "responses": {
+          "204": {
+            "description": "Deleted (or already absent — deletes are idempotent)"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above. Read-only tokens and tokens for lower-privileged users are refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/templates/{id}/zones/{zoneSlug}/blocks/reorder": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "zoneSlug",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "Blocks"
+        ],
+        "summary": "POST /api/templates/{id}/zones/{zoneSlug}/blocks/reorder",
+        "description": "Reorder the blocks in one zone of this template: body `{\"blockIds\": [...]}`; array order becomes orderIndex 0..n. Returns only this template's blocks in the zone, in their new order. Requires role editor or above; a lower-privileged token gets 403.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BlockInstance"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "blockIds must be an array of block ids",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above. Read-only tokens and tokens for lower-privileged users are refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/pages/{id}/template": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "tags": [
+          "Pages"
+        ],
+        "summary": "PUT /api/pages/{id}/template",
+        "description": "Assign (or replace) the template the page renders with; send `templateId: null` to unassign. Requires role editor or above; a lower-privileged token gets 403. Returns the updated page. 404 when the page or the template does not exist.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignTemplateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "page": {
+                      "$ref": "#/components/schemas/Page"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "templateId is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above. Read-only tokens and tokens for lower-privileged users are refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Page or template not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/store": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/store",
+        "description": "The store tenant’s public profile. Served by store tenants, not CMS tenants. No authentication. Store tenants also serve GET /api/v1/users/me (the uniform product-discovery call, PAT auth) and the authenticated catalogue API under /api/v1/categories and /api/v1/products (same Bearer scheme as the CMS); no cart, order or payment APIs exist yet.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The store profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "product": {
+                      "type": "string",
+                      "enum": [
+                        "store"
+                      ],
+                      "description": "Always \"store\" — confirms the tenant runs the store product."
+                    },
+                    "store": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "logo_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "currency": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "locale": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "timezone": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Store not yet provisioned — still identifies the tenant as a store",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "product": {
+                      "type": "string",
+                      "enum": [
+                        "store"
+                      ]
+                    },
+                    "error": {
+                      "type": "string",
+                      "enum": [
+                        "store_not_provisioned"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/categories": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/categories",
+        "description": "List the store’s categories, ordered by sort_order then name. Products reference these ids via /api/v1/products. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StoreCategory"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "503": {
+            "description": "Store not yet provisioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "POST /api/v1/categories",
+        "description": "Create a category. name is required; slug defaults to a slug derived from name. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string",
+                    "description": "Defaults to a slug derived from name. Must be unique across the store."
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "image_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "seo_title": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "seo_description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "parent_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Id of an existing category, or null for top level."
+                  },
+                  "sort_order": {
+                    "type": "integer"
+                  },
+                  "is_visible": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer"
+                    },
+                    "slug": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing name, or parent_id names no existing category",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "409": {
+            "description": "A category with this slug already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/categories/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/categories/{id}",
+        "description": "Fetch one category. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreCategory"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "404": {
+            "description": "No such category",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PATCH /api/v1/categories/{id}",
+        "description": "Partial update; send only the fields to change. A category cannot be its own parent. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string",
+                    "description": "Defaults to a slug derived from name. Must be unique across the store."
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "image_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "seo_title": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "seo_description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "parent_id": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Id of an existing category, or null for top level."
+                  },
+                  "sort_order": {
+                    "type": "integer"
+                  },
+                  "is_visible": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer"
+                    },
+                    "slug": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid field values",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "404": {
+            "description": "No such category",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A category with this slug already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "DELETE /api/v1/categories/{id}",
+        "description": "Delete a category. Child categories are detached (parent_id set to null), not deleted; product–category links are removed. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "404": {
+            "description": "No such category",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/products": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/products",
+        "description": "List products, ordered by sort_order then name. By default only active, visible products are returned (the storefront view). ?status=draft|active|archived filters by status regardless of visibility, ?status=all removes the status filter, and ?category=<id> keeps only products in that category. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "active",
+                "archived",
+                "all"
+              ]
+            },
+            "description": "Omit for active + visible only. Any explicit value ignores visibility."
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Only products in this category."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StoreProduct"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid status or category filter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Store not yet provisioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "POST /api/v1/products",
+        "description": "Create a product. name is required; slug defaults to a slug derived from name; status defaults to draft. Category membership is set through `categories` (array of category ids). Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string",
+                    "description": "Defaults to a slug derived from name. Must be unique across the store."
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "short_description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "product_type": {
+                    "type": "string",
+                    "enum": [
+                      "physical",
+                      "digital",
+                      "service",
+                      "affiliate"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "active",
+                      "archived"
+                    ],
+                    "description": "New products default to draft."
+                  },
+                  "price": {
+                    "type": "integer",
+                    "description": "Non-negative integer minor units (1999 = 19.99). Floats and negatives are rejected with 400, never rounded."
+                  },
+                  "compare_at_price": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Non-negative integer minor units, or null."
+                  },
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$",
+                    "description": "3-letter uppercase ISO 4217 code. Anything else is a 400. Defaults to the owning store’s currency when omitted on create."
+                  },
+                  "images": {
+                    "description": "Array of image URLs (or a pre-encoded JSON string).",
+                    "type": [
+                      "array",
+                      "string"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "seo_title": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "seo_description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "visible": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ]
+                  },
+                  "featured": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ]
+                  },
+                  "sort_order": {
+                    "type": "integer"
+                  },
+                  "categories": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "description": "Category ids. On PATCH this REPLACES the product’s membership (an empty array removes it from every category); omit the field to leave membership unchanged. An unknown id is a 400 and nothing is written."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer"
+                    },
+                    "slug": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing name, invalid price (must be a non-negative integer in minor units), or a categories id names no existing category",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "409": {
+            "description": "A product with this slug already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/products/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/products/{id}",
+        "description": "Fetch one product, any status. The row includes `categories`: the array of category ids the product belongs to. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/StoreProduct"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "categories": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "404": {
+            "description": "No such product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PATCH /api/v1/products/{id}",
+        "description": "Partial update; send only the fields to change. Sending `categories` REPLACES the product’s category membership in one transaction — it is not merged, so an empty array clears it. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string",
+                    "description": "Defaults to a slug derived from name. Must be unique across the store."
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "short_description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "product_type": {
+                    "type": "string",
+                    "enum": [
+                      "physical",
+                      "digital",
+                      "service",
+                      "affiliate"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "active",
+                      "archived"
+                    ],
+                    "description": "New products default to draft."
+                  },
+                  "price": {
+                    "type": "integer",
+                    "description": "Non-negative integer minor units (1999 = 19.99). Floats and negatives are rejected with 400, never rounded."
+                  },
+                  "compare_at_price": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Non-negative integer minor units, or null."
+                  },
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$",
+                    "description": "3-letter uppercase ISO 4217 code. Anything else is a 400. Defaults to the owning store’s currency when omitted on create."
+                  },
+                  "images": {
+                    "description": "Array of image URLs (or a pre-encoded JSON string).",
+                    "type": [
+                      "array",
+                      "string"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "seo_title": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "seo_description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "visible": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ]
+                  },
+                  "featured": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ]
+                  },
+                  "sort_order": {
+                    "type": "integer"
+                  },
+                  "categories": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "description": "Category ids. On PATCH this REPLACES the product’s membership (an empty array removes it from every category); omit the field to leave membership unchanged. An unknown id is a 400 and nothing is written."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer"
+                    },
+                    "slug": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid field values (price must be a non-negative integer in minor units; a categories id must name an existing category)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "404": {
+            "description": "No such product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A product with this slug already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "DELETE /api/v1/products/{id}",
+        "description": "Delete a product. Its category-membership rows are removed with it; categories themselves are untouched. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "404": {
+            "description": "No such product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/settings",
+        "description": "Read the store's settings: the 15 fields of StoreSettings, exactly — identity, contact, currency/locale/timezone, tax and analytics. The tax fields (tax_enabled, tax_rate, tax_inclusive) and the analytics ids (google_analytics_id, facebook_pixel_id) are STORED but not yet applied: tax is applied at checkout in slices 3–4 and analytics are emitted by the storefront in slice 6 — do not report them as live behaviour. Served by STORE tenants with store data. On a CMS tenant the SAME path exists too: the CMS’s own /api/v1 mirror routes it to a different CMS resource, so a 200 here does not prove you are talking to a store — check GET /api/v1/users/me, whose `product` field names the product that answered. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Store not yet provisioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PATCH /api/v1/settings",
+        "description": "Partial update; send only the fields to change. Only the 15 StoreSettings fields are writable — anything else in the body is ignored, not an error (id and slug can never be written). currency must be a 3-letter uppercase ISO 4217 code; tax_rate is a number 0-100; tax_enabled and tax_inclusive accept 0, 1, true or false (strings are a 400). A body with nothing updatable is a 400, not a no-op 200. The tax fields (tax_enabled, tax_rate, tax_inclusive) and the analytics ids (google_analytics_id, facebook_pixel_id) are STORED but not yet applied: tax is applied at checkout in slices 3–4 and analytics are emitted by the storefront in slice 6 — do not report them as live behaviour. Served by STORE tenants with store data. On a CMS tenant the SAME path exists too: the CMS’s own /api/v1 mirror routes it to a different CMS resource, so a 200 here does not prove you are talking to a store — check GET /api/v1/users/me, whose `product` field names the product that answered. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "1-60 characters."
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "logo_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "favicon_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "currency": {
+                    "type": "string",
+                    "description": "3-letter uppercase ISO 4217 code."
+                  },
+                  "locale": {
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "phone": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "address": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "tax_enabled": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ],
+                    "description": "Stored only in this release; tax is applied at checkout (slices 3-4)."
+                  },
+                  "tax_rate": {
+                    "type": "number",
+                    "description": "Percentage, 0-100. Stored only in this release; applied at checkout (slices 3-4)."
+                  },
+                  "tax_inclusive": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ],
+                    "description": "Stored only in this release; applied at checkout (slices 3-4)."
+                  },
+                  "google_analytics_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Stored only in this release; emitted by the storefront in slice 6."
+                  },
+                  "facebook_pixel_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Stored only in this release; emitted by the storefront in slice 6."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "settings": {
+                      "$ref": "#/components/schemas/StoreSettings"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid field value, or nothing updatable in the body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Store not yet provisioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/me": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "GET /api/v1/users/me",
+        "description": "Uniform product discovery: BOTH products serve this path. Returns the caller's own user row (never includes credential columns) plus `readOnly` — true when authenticating with a read-only PAT — `authMethod` (`pat` or `session`), and `product` (\"cms\" or \"store\"), which tells you which sections of this API the tenant serves. Make it the first call of every session. On CMS tenants it is the /api/v1 mirror of /api/users/me, so PATCH /api/v1/users/me works there too — documented once at PATCH /api/users/me, like every CMS operation. On store tenants only this /api/v1 path exists, and only as GET: PATCH is a 404 (a read-only token is refused first with 403 read_only_token).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The authenticated user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "product": {
+                      "type": "string",
+                      "enum": [
+                        "cms",
+                        "store"
+                      ],
+                      "description": "Which EdgePress product this tenant runs: \"cms\" (absent also means cms) or \"store\"."
+                    },
+                    "readOnly": {
+                      "type": "boolean",
+                      "description": "True when the presented PAT is read-only."
+                    },
+                    "authMethod": {
+                      "type": "string",
+                      "enum": [
+                        "pat",
+                        "session"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "PATCH /api/users/me",
+        "description": "Update the caller's own user row. **CMS tenants only** — the v1 path mirrors PATCH /api/users/me on a CMS. Store tenants serve GET at this path but not PATCH, and return 404 not_found for it; see GET /api/store for the store tenant's profile.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "404": {
+            "description": "Not found. Returned by store tenants, which do not support PATCH at this path."
           }
         }
       }
