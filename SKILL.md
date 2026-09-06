@@ -54,10 +54,23 @@ its 503 `store_not_provisioned` response carries it. Use it when you have no
 working token and need to tell a store from a dead tenant.
 
 A store tenant exposes `GET /api/store`, `GET /api/v1/users/me`, the
-catalogue API under `/api/v1/categories` and `/api/v1/products`, and the
-store's settings at `/api/v1/settings` (see Store operations). Every other
-store `/api/*` path requires PAT auth and then
-404s; there are no cart, order or payment endpoints yet. Attempting any CMS
+catalogue API under `/api/v1/categories` and `/api/v1/products`, the
+read-only orders API under `/api/v1/orders`, and the store's settings at
+`/api/v1/settings` (see Store operations). Shopper
+account endpoints (register/login/logout/me) live under `/api/shop` — they
+are cookie-authenticated (`__Host-shop_session` + `__Host-shop_csrf`) for storefront
+browsers. A PAT confers no SHOPPER identity on these routes, but it is NOT
+ignored: the shared Bearer branch runs before the shop routes' auth
+exemption is consulted, so a presented PAT is still validated and charged
+its per-token 60 req/min budget, an invalid or revoked PAT is a 401
+`invalid_token` before the route ever runs, and a read-only PAT is a 403
+`read_only_token` on any POST there (login, cart, checkout). A valid
+non-read-only PAT reaches the route as an anonymous shopper client with no
+session — `GET /api/shop/me` with only a PAT is a 401 `auth_required` — so
+do not use these routes to act for the merchant, and do not burn PAT rate
+budget on them. Every
+other store `/api/*` path requires PAT auth and then
+404s; there are no cart or payment endpoints, and orders are read-only. Attempting any CMS
 operation on a store tenant returns a bare 404.
 
 ## Setup check
@@ -430,10 +443,12 @@ writing any mutation.
 ## Store operations
 
 Store tenants in this release expose the public profile endpoint, the
-identity call, the catalogue API (categories + products) and the store's
-settings — nothing else. There are no cart, order or payment endpoints yet,
-and the users API is just the read-only `users/me` identity call (no user
-list, no profile writes). Do not guess at endpoints beyond these, and tell
+identity call, the catalogue API (categories + products), the store's
+settings, and a READ-ONLY orders API — nothing else. Orders are created by
+shopper checkout on the storefront, never through a PAT: there is no POST,
+no PATCH and no status change yet (those arrive in a later release), and
+there are no cart or payment endpoints. The users API is just the read-only
+`users/me` identity call (no user list, no profile writes). Do not guess at endpoints beyond these, and tell
 the user plainly when a request needs an API the store does not have yet.
 
 ```
@@ -449,6 +464,8 @@ POST   /api/v1/products            create a product ({name} required; slug deriv
 GET    /api/v1/products/{id}       one product, any status; includes categories: [ids]
 PATCH  /api/v1/products/{id}       partial update; categories REPLACES membership ([] clears it; omit to keep)
 DELETE /api/v1/products/{id}       delete; its category-membership rows go with it
+GET    /api/v1/orders              list orders, NEWEST FIRST, all statuses by default — ?status=pending_payment|paid|processing|shipped|completed|cancelled|refunded|all, ?limit= (1-100, default 50), ?offset=
+GET    /api/v1/orders/{id}         one order + its items; items are purchase-time SNAPSHOTS (name, unit_price) — later product edits never change them
 GET    /api/v1/settings            the store's settings: exactly 15 fields (identity, contact, currency/locale/timezone, tax, analytics)
 PATCH  /api/v1/settings            partial update of those 15 fields; anything else in the body is ignored, not an error
 ```
@@ -470,6 +487,18 @@ product defaults to `status: "draft"`, which the default product list does
 NOT show — pass `status: "active"` (and leave `visible` alone) to make it
 live, and use `?status=all` when auditing the whole catalogue. Product
 `visible` and `featured` are 0/1.
+
+Order money (`subtotal`, `total`, each item's `unit_price` and
+`line_total`) is the same integer-minor-units rule, in the order's own
+`currency` — it is what was actually charged at checkout and is never
+recomputed from live product rows. `customer_id` and `customer_email` are
+null on guest orders — a null customer is a normal, complete order, not an
+error. The order's own `email`/`name` are the checkout contact details and
+are present on guest orders too; `phone` is copied from the shopper's
+account at checkout time, and guest checkout collects no phone — so it is
+always null on guest orders and null for account holders who never gave
+one. Unknown ids from another store
+and malformed ids are a plain 404.
 
 Store settings (`/api/v1/settings`) cover exactly 15 fields: `name`,
 `description`, `logo_url`, `favicon_url`, `currency`, `locale`, `timezone`,

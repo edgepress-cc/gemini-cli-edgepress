@@ -27,6 +27,18 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "epat_<40>"
+      },
+      "shopperSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-shop_session",
+        "description": "Shopper session cookie (store tenants only). Set by POST /api/shop/login. For storefront browsers — PATs cannot obtain or use it. State-changing shopper requests must also echo the __Host-shop_csrf cookie's token in X-CSRF-Token."
+      },
+      "cartToken": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-shop_cart",
+        "description": "Anonymous guest-cart token (store tenants only). Minted (HttpOnly, 256-bit CSPRNG) by the first guest POST /api/shop/cart. A bearer credential for that one cart on that one store — it never authenticates a shopper. Signed-in requests ignore it: a __Host-shop_session cookie always binds cart operations to the customer instead."
       }
     },
     "schemas": {
@@ -951,6 +963,109 @@
           }
         }
       },
+      "StoreOrder": {
+        "type": "object",
+        "description": "A store order (slice 3a: read-only; status transitions arrive in a later release). Money fields are integer minor units in the order's own currency — totals are what was charged at checkout and are never re-derived from live product rows. customer_id and customer_email are null for guest orders; email/name are the contact details captured on the order itself at checkout; phone is copied from the shopper's account at checkout time — guest checkout collects no phone, so it is null on guest orders.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "customer_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Null for guest checkout, or when the customer account was later deleted."
+          },
+          "customer_email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The linked customer account's current email; null for guest orders."
+          },
+          "email": {
+            "type": "string",
+            "description": "Contact email captured on the order at checkout."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending_payment",
+              "paid",
+              "processing",
+              "shipped",
+              "completed",
+              "cancelled",
+              "refunded"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "description": "3-letter uppercase ISO 4217 code, fixed at checkout."
+          },
+          "subtotal": {
+            "type": "integer",
+            "description": "Integer minor units."
+          },
+          "total": {
+            "type": "integer",
+            "description": "Integer minor units. What was actually charged; never recomputed from live prices."
+          },
+          "placed_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "StoreOrderItem": {
+        "type": "object",
+        "description": "A line item, rendered from its purchase-time snapshot: name and unit_price are what was sold at what price, immune to later product edits. product_id is null when the product was deleted after the sale.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "product_id": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Name snapshot at purchase time."
+          },
+          "unit_price": {
+            "type": "integer",
+            "description": "Integer minor units, snapshotted at purchase time."
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "line_total": {
+            "type": "integer",
+            "description": "Integer minor units."
+          }
+        }
+      },
       "StoreSettings": {
         "type": "object",
         "description": "The store's configuration: exactly these 15 fields, nothing else (id, slug and user_id are never exposed here). The tax fields (tax_enabled, tax_rate, tax_inclusive) and the analytics ids (google_analytics_id, facebook_pixel_id) are STORED but not yet applied: tax is applied at checkout in slices 3–4 and analytics are emitted by the storefront in slice 6 — do not report them as live behaviour.",
@@ -1038,6 +1153,62 @@
               "null"
             ],
             "description": "Stored only in this release; emitted by the storefront in slice 6."
+          }
+        }
+      },
+      "Cart": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "null when the owner has no cart yet."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "subtotal": {
+            "type": "integer",
+            "description": "Integer minor units (1999 = 19.99). Sum of available lines only."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CartItem"
+            }
+          }
+        }
+      },
+      "CartItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "product_id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "price": {
+            "type": "integer",
+            "description": "The LIVE product price in integer minor units — a cart re-reads the catalogue; only a placed order snapshots prices (CD6). Deliberately not named unit_price: that name is the add-time snapshot column, which this field does not mirror."
+          },
+          "line_total": {
+            "type": "integer"
+          },
+          "available": {
+            "type": "boolean",
+            "description": "false when the line cannot be sold as-is — product archived, hidden, re-listed in a currency other than the cart's, or priced past the money ceiling. The line stays visible but is excluded from subtotal."
           }
         }
       }
@@ -9352,7 +9523,7 @@
           "Store"
         ],
         "summary": "GET /api/store",
-        "description": "The store tenant’s public profile. Served by store tenants, not CMS tenants. No authentication. Store tenants also serve GET /api/v1/users/me (the uniform product-discovery call, PAT auth) and the authenticated catalogue API under /api/v1/categories and /api/v1/products (same Bearer scheme as the CMS); no cart, order or payment APIs exist yet.",
+        "description": "The store tenant’s public profile. Served by store tenants, not CMS tenants. No authentication. Store tenants also serve GET /api/v1/users/me (the uniform product-discovery call, PAT auth) and the authenticated catalogue API under /api/v1/categories and /api/v1/products (same Bearer scheme as the CMS); no cart, order or payment APIs exist yet. Shopper account endpoints (register/login/logout/me) live under /api/shop — cookie-authenticated, for storefront browsers, not PATs.",
         "security": [],
         "responses": {
           "200": {
@@ -9441,6 +9612,1296 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/shop/register": {
+      "post": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "POST /api/shop/register",
+        "description": "Create a shopper account on a store tenant (storefront surface, cookie world — not for PATs). Returns the same generic success whether the email was fresh or already registered, so registration cannot be used to enumerate customer emails. Does NOT start a session; call /api/shop/login next. Rate limited per IP.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "description": "Min 8 chars with upper, lower and digit."
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "phone": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generic success — identical for fresh and duplicate emails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failure (bad email, weak password, unknown field).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "store_not_provisioned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shop/login": {
+      "post": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "POST /api/shop/login",
+        "description": "Shopper sign-in. Sets the __Host-shop_session (HttpOnly) and __Host-shop_csrf cookies. If a __Host-shop_cart guest-cart token rides along, that guest cart merges into the customer's cart on this store (same product sums quantities, capped at 999; products in only one cart carry over) and the __Host-shop_cart cookie is expired — the guest token is invalidated. Cross-site POSTs (mismatched Origin header) are rejected with 403 before anything else. Every credential failure mode — unknown email, wrong password, disabled account — returns one identical 401. Rate limited per IP and per (email, IP); sustained failure returns 429 before credentials are checked.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in; __Host-shop_session + __Host-shop_csrf cookies set. Any guest cart was merged and its __Host-shop_cart cookie expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "customer": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "email": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_credentials — one response for every failure mode.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "cross_origin_rejected — the Origin header names another site (login CSRF protection).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shop/logout": {
+      "post": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "POST /api/shop/logout",
+        "description": "Destroy the shopper session (real revocation — the KV record is deleted, not just the cookie) and expire both shopper cookies. Requires the __Host-shop_csrf double-submit: echo the __Host-shop_csrf cookie's token in X-CSRF-Token.",
+        "security": [
+          {
+            "shopperSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The __Host-shop_csrf cookie value (HMAC-bound to this session)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Logged out; cookies expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF token missing, mismatched, or bound to a different session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shop/me": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/shop/me",
+        "description": "The signed-in shopper's own record (never password_hash).",
+        "security": [
+          {
+            "shopperSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The shopper.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "customer": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "email": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "phone": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "created_at": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "auth_required — no valid shopper session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shop/password-reset/request": {
+      "post": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "POST /api/shop/password-reset/request",
+        "description": "Request a shopper password reset (storefront surface, cookie world — not for PATs). Always returns the same generic success whether or not the email belongs to a customer, so it cannot enumerate customer emails. Mints a single-use reset token valid for 1 hour, stored only as a SHA-256 hash; email delivery of the reset link ships in a later slice. Rate limited per IP and per (email, IP).",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generic success — identical for known and unknown emails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited."
+          },
+          "413": {
+            "description": "Request body too large.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Store not provisioned yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shop/password-reset/confirm": {
+      "post": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "POST /api/shop/password-reset/confirm",
+        "description": "Redeem a password-reset token and set a new password. The token is single-use; unknown, expired and already-used tokens return one identical 400. On success every existing shopper session for that customer is revoked and no new session is started — sign in at /api/shop/login with the new password. Rate limited per IP.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token",
+                  "password"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "64-char lowercase hex token from the reset link."
+                  },
+                  "password": {
+                    "type": "string",
+                    "description": "Min 8 chars with upper, lower and digit."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset; all existing shopper sessions revoked. No cookies set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, expired or already-used token, or weak password.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited."
+          },
+          "413": {
+            "description": "Request body too large.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shop/cart": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/shop/cart",
+        "description": "The current cart: the signed-in shopper's (__Host-shop_session) or the guest cart the __Host-shop_cart token resolves to on this store. Reading never creates a cart. Prices are live; lines whose product is no longer sellable come back with available:false and are excluded from subtotal.",
+        "security": [
+          {
+            "shopperSession": []
+          },
+          {
+            "cartToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The cart. id is null and items empty when none exists yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "cart": {
+                      "$ref": "#/components/schemas/Cart"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "store_not_provisioned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "POST /api/shop/cart",
+        "description": "Add a product to the cart, creating the cart if needed — a guest's first add mints the __Host-shop_cart cookie. Adding a product already in the cart sums quantities (capped at 999). Signed-in requests must echo __Host-shop_csrf in X-CSRF-Token. Rate limited per IP; sustained abuse returns 429.",
+        "security": [
+          {
+            "shopperSession": []
+          },
+          {
+            "cartToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "product_id",
+                  "quantity"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "product_id": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 999
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated cart. A new guest cart also sets the __Host-shop_cart cookie.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "cart": {
+                      "$ref": "#/components/schemas/Cart"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_product_id / invalid_quantity — non-integer, zero, negative or absurd values.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF_INVALID — signed-in write without a valid X-CSRF-Token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "product_not_found — missing, archived, hidden, other-store, off-currency (a product listed in a currency other than the cart's) and absurdly-priced products are indistinguishable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "store_not_provisioned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shop/cart/{itemId}": {
+      "patch": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PATCH /api/shop/cart/{itemId}",
+        "description": "Set a cart line's quantity. The line must belong to the cart this request's own credentials resolve to — anyone else's line id returns the same 404 as a nonexistent one. Signed-in requests must echo __Host-shop_csrf in X-CSRF-Token.",
+        "security": [
+          {
+            "shopperSession": []
+          },
+          {
+            "cartToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "quantity"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 999
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated cart.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "cart": {
+                      "$ref": "#/components/schemas/Cart"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_quantity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "item_not_found — no such line in YOUR cart.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body too large.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "store_not_provisioned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "DELETE /api/shop/cart/{itemId}",
+        "description": "Remove a cart line. Same ownership rule as PATCH. Signed-in requests must echo __Host-shop_csrf in X-CSRF-Token.",
+        "security": [
+          {
+            "shopperSession": []
+          },
+          {
+            "cartToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The updated cart.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "cart": {
+                      "$ref": "#/components/schemas/Cart"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CSRF_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "item_not_found — no such line in YOUR cart.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "store_not_provisioned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shop/checkout": {
+      "post": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "POST /api/shop/checkout",
+        "description": "Turn the current cart into an order. Guest checkout (__Host-shop_cart token) requires email and optionally name in the body and must be same-origin; the order's customer_id is null. Signed-in checkout (__Host-shop_session) must echo __Host-shop_csrf in X-CSRF-Token; contact fields come from the account and the body is ignored. Line items snapshot name and the live price at checkout; totals are computed server-side in integer minor units. The cart is consumed atomically (a guest's __Host-shop_cart cookie is cleared). Order status starts as pending_payment; payment itself ships in slice 3b. Rate limited per IP.",
+        "security": [
+          {
+            "shopperSession": []
+          },
+          {
+            "cartToken": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "description": "Required for guest checkout; ignored when signed in."
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The order as placed: id, status pending_payment, currency, subtotal/total in minor units, and line items with snapshotted name, unit_price and line_total.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "order": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending_payment"
+                          ]
+                        },
+                        "customer_id": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "email": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "subtotal": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "product_id": {
+                                "type": "integer"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "unit_price": {
+                                "type": "integer"
+                              },
+                              "quantity": {
+                                "type": "integer"
+                              },
+                              "line_total": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "cart_empty (no cart, or nothing in it), invalid_email / invalid_name (guest fields), or an unknown field — client-supplied totals are rejected."
+          },
+          "403": {
+            "description": "CSRF_INVALID (signed-in, bad or missing X-CSRF-Token) or cross_origin_rejected (guest POST from another origin)."
+          },
+          "409": {
+            "description": "cart_unavailable_items — the cart holds a line whose product is archived, hidden, off-currency or over the price ceiling; product_ids names them. Remove those lines and retry."
+          },
+          "413": {
+            "description": "body_too_large — the declared Content-Length exceeds the 16KB shop-API body cap."
+          },
+          "429": {
+            "description": "Rate limited."
+          },
+          "503": {
+            "description": "store_not_provisioned — the tenant's store row does not exist yet."
           }
         }
       }
@@ -10593,6 +12054,226 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/orders": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/orders",
+        "description": "List the store's orders, newest first (placed_at, then id, both descending). All statuses are returned by default — ?status= narrows to one. Paged: ?limit= (default 50, max 100) and ?offset=. Guest orders (customer_id null) are always included alongside account orders. Served by STORE tenants only; read-only tokens may GET. This surface is read-only in this release: there is no POST/PATCH — orders are created by shopper checkout and status transitions arrive later.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending_payment",
+                "paid",
+                "processing",
+                "shipped",
+                "completed",
+                "cancelled",
+                "refunded",
+                "all"
+              ]
+            },
+            "description": "Omit (or pass all) for every status."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            },
+            "description": "Page size, 1-100. Anything else is a 400."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "description": "Rows to skip. Negative is a 400."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StoreOrder"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid status, limit or offset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Store not yet provisioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/orders/{id}": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/orders/{id}",
+        "description": "One order with its line items. Items render from their purchase-time snapshots (name, unit_price) — later product edits never change them, and the totals are what was charged. Another store's order id is a plain 404. Read-only in this release.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/StoreOrder"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/StoreOrderItem"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "404": {
+            "description": "No such order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Store not yet provisioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
