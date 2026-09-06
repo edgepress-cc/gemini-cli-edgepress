@@ -55,7 +55,8 @@ working token and need to tell a store from a dead tenant.
 
 A store tenant exposes `GET /api/store`, `GET /api/v1/users/me`, the
 catalogue API under `/api/v1/categories` and `/api/v1/products`, the
-read-only orders API under `/api/v1/orders`, and the store's settings at
+read-only orders API under `/api/v1/orders`, the payment-method CRUD under
+`/api/v1/payment-methods`, and the store's settings at
 `/api/v1/settings` (see Store operations). Shopper
 account endpoints (register/login/logout/me) live under `/api/shop` — they
 are cookie-authenticated (`__Host-shop_session` + `__Host-shop_csrf`) for storefront
@@ -70,7 +71,7 @@ session — `GET /api/shop/me` with only a PAT is a 401 `auth_required` — so
 do not use these routes to act for the merchant, and do not burn PAT rate
 budget on them. Every
 other store `/api/*` path requires PAT auth and then
-404s; there are no cart or payment endpoints, and orders are read-only. Attempting any CMS
+404s; there are no PAT cart endpoints, and orders are read-only. Attempting any CMS
 operation on a store tenant returns a bare 404.
 
 ## Setup check
@@ -444,10 +445,12 @@ writing any mutation.
 
 Store tenants in this release expose the public profile endpoint, the
 identity call, the catalogue API (categories + products), the store's
-settings, and a READ-ONLY orders API — nothing else. Orders are created by
-shopper checkout on the storefront, never through a PAT: there is no POST,
-no PATCH and no status change yet (those arrive in a later release), and
-there are no cart or payment endpoints. The users API is just the read-only
+settings, an orders API, and the payment-method CRUD — nothing
+else. Orders are created by shopper checkout on the storefront, never
+through a PAT: there is no POST, no PATCH on the order itself, and there
+are no PAT cart endpoints. The ONE order write in this release is
+recording payment receipt (below) — every other status change arrives in
+a later release. The users API is just the read-only
 `users/me` identity call (no user list, no profile writes). Do not guess at endpoints beyond these, and tell
 the user plainly when a request needs an API the store does not have yet.
 
@@ -465,7 +468,13 @@ GET    /api/v1/products/{id}       one product, any status; includes categories:
 PATCH  /api/v1/products/{id}       partial update; categories REPLACES membership ([] clears it; omit to keep)
 DELETE /api/v1/products/{id}       delete; its category-membership rows go with it
 GET    /api/v1/orders              list orders, NEWEST FIRST, all statuses by default — ?status=pending_payment|paid|processing|shipped|completed|cancelled|refunded|all, ?limit= (1-100, default 50), ?offset=
-GET    /api/v1/orders/{id}         one order + its items; items are purchase-time SNAPSHOTS (name, unit_price) — later product edits never change them
+GET    /api/v1/orders/{id}         one order + its items; items are purchase-time SNAPSHOTS (name, unit_price) — later product edits never change them; also payments: the order's payment attempts — payments[].id is the paymentId for the PATCH below
+PATCH  /api/v1/orders/{orderId}/payments/{paymentId} record that the money arrived: {status: "received", reference?} — the payment goes received, the order goes pending_payment → paid
+GET    /api/v1/payment-methods     list payment methods (sort_order, then name); ALL rows, disabled included — the operator view, not the checkout offer
+POST   /api/v1/payment-methods     create ({provider, name} required; instructions null, enabled 1, sort_order 0 by default)
+GET    /api/v1/payment-methods/{id} one method
+PATCH  /api/v1/payment-methods/{id} partial update (send only changed fields); an unknown field is a 400 unknown_field:<name>, never ignored
+DELETE /api/v1/payment-methods/{id} delete; past payments keep their provider/name snapshots, their method_id goes null
 GET    /api/v1/settings            the store's settings: exactly 15 fields (identity, contact, currency/locale/timezone, tax, analytics)
 PATCH  /api/v1/settings            partial update of those 15 fields; anything else in the body is ignored, not an error
 ```
@@ -499,6 +508,54 @@ account at checkout time, and guest checkout collects no phone — so it is
 always null on guest orders and null for account holders who never gave
 one. Unknown ids from another store
 and malformed ids are a plain 404.
+
+Payment methods are operator-defined rows backed by a FIXED provider
+registry: `provider` must be one of `bank_transfer`, `cash_on_delivery`,
+`hyp`, `payplus` — anything else is a 400, and the operator owns only the
+display text (`name` 1-120 chars, `instructions` up to 4000 chars or null,
+`enabled` 0/1, `sort_order` 0-9999). `hyp` and `payplus` are REGISTERED but
+NOT YET IMPLEMENTED: you may create and configure a method for them, but
+checkout refuses to take money through them until a later release — do not
+tell a merchant such a method is live. The checkout offer itself is the
+storefront's `GET /api/shop/payment-methods` (no auth, for shopper
+browsers, not PATs): only rows that are BOTH enabled AND backed by an
+implemented provider — a configured `hyp`/`payplus` method never appears
+there. Payment-method writes return
+`{"success": true, "id"}` (no slug). Unlike other store writes, an unknown
+body field is rejected with 400 `unknown_field:<name>`, never silently
+ignored.
+
+Shopper checkout (`POST /api/shop/checkout`) takes an optional
+`payment_method_id` — an id from that offer. While the store has NO enabled
+method on an implemented provider, checkout works exactly as before and
+records no payment; once it has one, a valid id is REQUIRED (400
+`payment_method_required` without it, `invalid_payment_method` for an
+unknown/disabled id). Posting a `hyp`/`payplus` method's id directly is
+refused with 400 `payment_method_unavailable` and writes nothing. A
+successful choice books a `pending` payment on the order — provider and
+method name snapshotted, amount/currency always the server's own numbers —
+and the response gains `payment: {method_name, instructions}` for the
+confirmation page.
+
+Recording receipt (`PATCH /api/v1/orders/{orderId}/payments/{paymentId}`)
+is the loop: list orders with `?status=pending_payment`, GET the order,
+read `payments[].id` off it, PATCH. It accepts ONLY
+`status: "received"` — `failed` and `refunded` exist in the data model
+but are NOT settable in this release (400), and there is no other status
+transition of any kind: no refund, no cancel, no shipping update.
+`reference` is optional plain text up to 200 characters (control bytes
+and angle brackets rejected; anything longer is a 400, NEVER truncated —
+it must match a bank statement byte for byte); omit it to keep a
+previously stored one, send null or blank to clear it. Like
+payment-method writes, an unknown body field is a 400
+`unknown_field:<name>`, never silently ignored — a typo'd `refrence`
+would otherwise record no reference and tell you nothing. The call is
+idempotent — repeating it returns 200 and never moves an order that has
+already gone past `pending_payment` (a `shipped` order stays `shipped`;
+only the payment row updates) — but a `cancelled` or `refunded` order is
+a 409: the money already left, and receipt cannot be recorded on it. The
+payment must belong to the order in the URL and to this store: any
+mismatch, unknown id or malformed id is a plain 404.
 
 Store settings (`/api/v1/settings`) cover exactly 15 fields: `name`,
 `description`, `logo_url`, `favicon_url`, `currency`, `locale`, `timezone`,

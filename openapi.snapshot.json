@@ -1066,6 +1066,62 @@
           }
         }
       },
+      "StorePaymentMethod": {
+        "type": "object",
+        "description": "An operator-defined payment method. The operator owns the display text (name, instructions, enabled, sort_order); the provider identifier comes from a fixed registry. Deleting a method never destroys payment records — payments snapshot the provider and name at payment time.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "store_id": {
+            "type": "integer"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "bank_transfer",
+              "cash_on_delivery",
+              "hyp",
+              "payplus"
+            ],
+            "description": "The fixed provider kind this method is backed by — what payment code dispatches on. hyp and payplus are registered but NOT yet implemented: a method may be configured for them, but checkout refuses them as not yet available."
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Operator-facing and shopper-facing display name, 1-120 characters (trimmed)."
+          },
+          "instructions": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 4000,
+            "description": "Free-text payment instructions shown to the shopper (e.g. bank details), at most 4000 characters, or null."
+          },
+          "enabled": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ],
+            "description": "0/1 (booleans accepted). Only enabled methods are offered at checkout."
+          },
+          "sort_order": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9999
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          },
+          "updated_at": {
+            "type": "integer",
+            "description": "Unix seconds."
+          }
+        }
+      },
       "StoreSettings": {
         "type": "object",
         "description": "The store's configuration: exactly these 15 fields, nothing else (id, slug and user_id are never exposed here). The tax fields (tax_enabled, tax_rate, tax_inclusive) and the analytics ids (google_analytics_id, facebook_pixel_id) are STORED but not yet applied: tax is applied at checkout in slices 3–4 and analytics are emitted by the storefront in slice 6 — do not report them as live behaviour.",
@@ -9523,7 +9579,7 @@
           "Store"
         ],
         "summary": "GET /api/store",
-        "description": "The store tenant’s public profile. Served by store tenants, not CMS tenants. No authentication. Store tenants also serve GET /api/v1/users/me (the uniform product-discovery call, PAT auth) and the authenticated catalogue API under /api/v1/categories and /api/v1/products (same Bearer scheme as the CMS); no cart, order or payment APIs exist yet. Shopper account endpoints (register/login/logout/me) live under /api/shop — cookie-authenticated, for storefront browsers, not PATs.",
+        "description": "The store tenant’s public profile. Served by store tenants, not CMS tenants. No authentication. Store tenants also serve GET /api/v1/users/me (the uniform product-discovery call, PAT auth) and the authenticated catalogue API under /api/v1/categories and /api/v1/products (same Bearer scheme as the CMS), plus read-only orders, the payment-method CRUD and settings under /api/v1. Shopper endpoints — account (register/login/logout/me), cart, checkout and the payment-method offer — live under /api/shop, cookie-authenticated, for storefront browsers, not PATs.",
         "security": [],
         "responses": {
           "200": {
@@ -10781,7 +10837,7 @@
           "Store"
         ],
         "summary": "POST /api/shop/checkout",
-        "description": "Turn the current cart into an order. Guest checkout (__Host-shop_cart token) requires email and optionally name in the body and must be same-origin; the order's customer_id is null. Signed-in checkout (__Host-shop_session) must echo __Host-shop_csrf in X-CSRF-Token; contact fields come from the account and the body is ignored. Line items snapshot name and the live price at checkout; totals are computed server-side in integer minor units. The cart is consumed atomically (a guest's __Host-shop_cart cookie is cleared). Order status starts as pending_payment; payment itself ships in slice 3b. Rate limited per IP.",
+        "description": "Turn the current cart into an order. Guest checkout (__Host-shop_cart token) requires email and optionally name in the body and must be same-origin; the order's customer_id is null. Signed-in checkout (__Host-shop_session) must echo __Host-shop_csrf in X-CSRF-Token; contact fields come from the account, and the body may carry only payment_method_id (a bodyless POST is accepted). Line items snapshot name and the live price at checkout; totals are computed server-side in integer minor units — a client-supplied amount, price or currency is rejected by name, never used. Payment (slice 3b): while the store has NO enabled method backed by an implemented provider, checkout works exactly as before and records no payment; once it has at least one, a valid payment_method_id (an id from GET /api/shop/payment-methods) is REQUIRED, and the order gets a 'pending' payment row snapshotting the method's provider and name, with amount/currency taken from the order's own server-computed subtotal and currency. Choosing a method whose provider is registered but not yet implemented (hyp, payplus) is refused with 400 payment_method_unavailable before anything is written. The cart is consumed atomically (a guest's __Host-shop_cart cookie is cleared). Order status starts as pending_payment. Rate limited per IP.",
         "security": [
           {
             "shopperSession": []
@@ -10806,6 +10862,10 @@
                   "name": {
                     "type": "string",
                     "maxLength": 200
+                  },
+                  "payment_method_id": {
+                    "type": "integer",
+                    "description": "Id of an enabled method from GET /api/shop/payment-methods. Required once the store has at least one enabled method with an implemented provider; omit while it has none."
                   }
                 }
               }
@@ -10814,7 +10874,7 @@
         },
         "responses": {
           "200": {
-            "description": "The order as placed: id, status pending_payment, currency, subtotal/total in minor units, and line items with snapshotted name, unit_price and line_total.",
+            "description": "The order as placed: id, status pending_payment, currency, subtotal/total in minor units, and line items with snapshotted name, unit_price and line_total. When a payment method was chosen, `payment` carries the method's display name and instructions for the confirmation page; it is absent when the store has no methods.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10879,6 +10939,19 @@
                           }
                         }
                       }
+                    },
+                    "payment": {
+                      "type": "object",
+                      "description": "Present only when a payment method was chosen.",
+                      "properties": {
+                        "method_name": {
+                          "type": "string"
+                        },
+                        "instructions": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
                     }
                   }
                 }
@@ -10886,7 +10959,7 @@
             }
           },
           "400": {
-            "description": "cart_empty (no cart, or nothing in it), invalid_email / invalid_name (guest fields), or an unknown field — client-supplied totals are rejected."
+            "description": "cart_empty (no cart, or nothing in it), invalid_email / invalid_name (guest fields), an unknown field — client-supplied totals are rejected — or a payment refusal: payment_method_required (the store has an enabled, implemented method but none was chosen), invalid_payment_method (unknown, disabled or another store's id), payment_method_unavailable (the method's provider — hyp or payplus — is registered but not yet implemented; nothing is written)."
           },
           "403": {
             "description": "CSRF_INVALID (signed-in, bad or missing X-CSRF-Token) or cross_origin_rejected (guest POST from another origin)."
@@ -10902,6 +10975,81 @@
           },
           "503": {
             "description": "store_not_provisioned — the tenant's store row does not exist yet."
+          }
+        }
+      }
+    },
+    "/api/shop/payment-methods": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/shop/payment-methods",
+        "description": "The checkout OFFER: the payment methods a shopper may actually pay with — only rows that are both enabled by the operator AND backed by an implemented provider. A configured hyp/payplus method is deliberately NOT offered (registered but not yet implemented; nothing can take money through them until a later release). No authentication; per-IP rate limited.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The offered methods, sort_order then name. Only shopper-facing fields — never enabled, sort_order or timestamps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "methods": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "bank_transfer",
+                              "cash_on_delivery"
+                            ]
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "instructions": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited."
+          },
+          "503": {
+            "description": "store_not_provisioned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -12185,7 +12333,7 @@
           "Store"
         ],
         "summary": "GET /api/v1/orders/{id}",
-        "description": "One order with its line items. Items render from their purchase-time snapshots (name, unit_price) — later product edits never change them, and the totals are what was charged. Another store's order id is a plain 404. Read-only in this release.",
+        "description": "One order with its line items. Items render from their purchase-time snapshots (name, unit_price) — later product edits never change them, and the totals are what was charged. Another store's order id is a plain 404. The order itself is read-only — the one write is recording payment receipt at PATCH /api/v1/orders/{orderId}/payments/{paymentId}. The response also carries payments: the payment attempts on the order (id, provider, method_name_snapshot, status, amount, currency, reference, timestamps) — the payments[].id is the paymentId for PATCH /api/v1/orders/{orderId}/payments/{paymentId}; an order placed with no payment method has an empty array.",
         "security": [
           {
             "bearerAuth": []
@@ -12218,6 +12366,60 @@
                           "type": "array",
                           "items": {
                             "$ref": "#/components/schemas/StoreOrderItem"
+                          }
+                        },
+                        "payments": {
+                          "type": "array",
+                          "description": "Payment attempts on this order, oldest first. Each item's id is the paymentId for PATCH /api/v1/orders/{orderId}/payments/{paymentId}.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "integer"
+                              },
+                              "provider": {
+                                "type": "string",
+                                "enum": [
+                                  "bank_transfer",
+                                  "cash_on_delivery",
+                                  "hyp",
+                                  "payplus"
+                                ]
+                              },
+                              "method_name_snapshot": {
+                                "type": "string",
+                                "description": "The payment method's display name at checkout time — survives the method's deletion."
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "pending",
+                                  "received",
+                                  "failed",
+                                  "refunded"
+                                ],
+                                "description": "Only 'pending' and 'received' occur in this release."
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "Integer minor units, in the order's own currency — server-computed at checkout."
+                              },
+                              "currency": {
+                                "type": "string"
+                              },
+                              "reference": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "created_at": {
+                                "type": "integer"
+                              },
+                              "updated_at": {
+                                "type": "integer"
+                              }
+                            }
                           }
                         }
                       }
@@ -12274,6 +12476,641 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/orders/{orderId}/payments/{paymentId}": {
+      "parameters": [
+        {
+          "name": "orderId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "paymentId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "patch": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PATCH /api/v1/orders/{orderId}/payments/{paymentId}",
+        "description": "Record that the money for an offline payment arrived: the payment goes 'received' and the order goes pending_payment → paid. Accepts ONLY status: 'received' — 'failed' and 'refunded' exist in the data model but are not settable in this release, and no other order status transition of any kind is available. Idempotent: repeating the call returns 200, and an order that has already moved past pending_payment (e.g. shipped) is never dragged back to paid — only the payment row updates. Recording receipt on a cancelled or refunded order is a 409 — the money already left, and a received payment on a dead order would be a silent contradiction. An unknown body field is rejected with 400 unknown_field:<name>, never silently ignored, and a reference over 200 characters is a 400, never truncated. The payment must belong to the order in the URL and to this store; any mismatch, unknown id or malformed id is a plain 404. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "received"
+                    ],
+                    "description": "The only accepted value in this release. Sending 'failed' or 'refunded' is a 400 — those transitions belong to later releases."
+                  },
+                  "reference": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 200,
+                    "description": "Optional operator note identifying the money (e.g. a bank transfer reference). Plain text — control bytes and angle brackets are rejected, and anything over 200 characters is a 400, never truncated. Omit to keep a previously stored reference; null or blank clears it."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK — the payment is recorded as received and the order is paid (or was already past pending_payment)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "id": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed: status was not 'received' (the only transition available in this release), the reference was not plain text or exceeded 200 characters (rejected, never truncated), an unknown field was sent (unknown_field:<name>), or the body was not a JSON object",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "404": {
+            "description": "No such payment on this order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The order is cancelled or refunded — receipt cannot be recorded on it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Store not yet provisioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/payment-methods": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/payment-methods",
+        "description": "List the store's payment methods, ordered by sort_order then name. All rows are returned, disabled ones included — this is the operator's view, not the checkout offer. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StorePaymentMethod"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Store not yet provisioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "POST /api/v1/payment-methods",
+        "description": "Create a payment method. provider and name are required; instructions defaults to null, enabled to 1, sort_order to 0. provider must be one of bank_transfer, cash_on_delivery, hyp, payplus — anything else is a 400, and any field outside the writable set is rejected as unknown_field:<name>. Creating a method for a registered-but-unimplemented provider (hyp, payplus) is allowed; taking money through it is refused at checkout until it is implemented. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "provider",
+                  "name"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "bank_transfer",
+                      "cash_on_delivery",
+                      "hyp",
+                      "payplus"
+                    ],
+                    "description": "The fixed provider kind this method is backed by — what payment code dispatches on. hyp and payplus are registered but NOT yet implemented: a method may be configured for them, but checkout refuses them as not yet available."
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": "Operator-facing and shopper-facing display name, 1-120 characters (trimmed)."
+                  },
+                  "instructions": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 4000,
+                    "description": "Free-text payment instructions shown to the shopper (e.g. bank details), at most 4000 characters, or null."
+                  },
+                  "enabled": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ],
+                    "description": "0/1 (booleans accepted). Only enabled methods are offered at checkout."
+                  },
+                  "sort_order": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9999
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "id": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — unknown provider, missing provider or name, out-of-range field, or an unknown field (unknown_field:<name>)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Store not yet provisioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/payment-methods/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/payment-methods/{id}",
+        "description": "One payment method. Unknown ids, malformed ids and another store's methods are a plain 404. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorePaymentMethod"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "404": {
+            "description": "No such payment method",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PATCH /api/v1/payment-methods/{id}",
+        "description": "Partial update — send only changed fields (provider, name, instructions, enabled, sort_order). Every field is validated exactly as on create; an unknown field is unknown_field:<name>, and a body with nothing updatable is a 400. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "bank_transfer",
+                      "cash_on_delivery",
+                      "hyp",
+                      "payplus"
+                    ],
+                    "description": "The fixed provider kind this method is backed by — what payment code dispatches on. hyp and payplus are registered but NOT yet implemented: a method may be configured for them, but checkout refuses them as not yet available."
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": "Operator-facing and shopper-facing display name, 1-120 characters (trimmed)."
+                  },
+                  "instructions": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 4000,
+                    "description": "Free-text payment instructions shown to the shopper (e.g. bank details), at most 4000 characters, or null."
+                  },
+                  "enabled": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ],
+                    "description": "0/1 (booleans accepted). Only enabled methods are offered at checkout."
+                  },
+                  "sort_order": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9999
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "id": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed, or no updatable fields provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "404": {
+            "description": "No such payment method",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "DELETE /api/v1/payment-methods/{id}",
+        "description": "Delete a payment method. Existing payment records are untouched — they snapshot provider and name, and their method_id reference goes null. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "id": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "404": {
+            "description": "No such payment method",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
