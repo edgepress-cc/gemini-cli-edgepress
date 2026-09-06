@@ -55,8 +55,9 @@ working token and need to tell a store from a dead tenant.
 
 A store tenant exposes `GET /api/store`, `GET /api/v1/users/me`, the
 catalogue API under `/api/v1/categories` and `/api/v1/products`, the
-read-only orders API under `/api/v1/orders`, the payment-method CRUD under
-`/api/v1/payment-methods`, and the store's settings at
+orders API under `/api/v1/orders`, the payment-method CRUD under
+`/api/v1/payment-methods`, the customers API under `/api/v1/customers`,
+and the store's settings at
 `/api/v1/settings` (see Store operations). Shopper
 account endpoints (register/login/logout/me) live under `/api/shop` — they
 are cookie-authenticated (`__Host-shop_session` + `__Host-shop_csrf`) for storefront
@@ -71,7 +72,7 @@ session — `GET /api/shop/me` with only a PAT is a 401 `auth_required` — so
 do not use these routes to act for the merchant, and do not burn PAT rate
 budget on them. Every
 other store `/api/*` path requires PAT auth and then
-404s; there are no PAT cart endpoints, and orders are read-only. Attempting any CMS
+404s; there are no PAT cart endpoints, and no PAT can create an order. Attempting any CMS
 operation on a store tenant returns a bare 404.
 
 ## Setup check
@@ -445,12 +446,16 @@ writing any mutation.
 
 Store tenants in this release expose the public profile endpoint, the
 identity call, the catalogue API (categories + products), the store's
-settings, an orders API, and the payment-method CRUD — nothing
+settings, an orders API, the payment-method CRUD, and the customers
+list with its enable/disable control — nothing
 else. Orders are created by shopper checkout on the storefront, never
-through a PAT: there is no POST, no PATCH on the order itself, and there
-are no PAT cart endpoints. The ONE order write in this release is
-recording payment receipt (below) — every other status change arrives in
-a later release. The users API is just the read-only
+through a PAT: there is no POST /api/v1/orders, and there
+are no PAT cart endpoints. The order writes are exactly two: the
+lifecycle PATCH and recording payment receipt (both below) — an order's
+line items, totals and captured contact details are never editable.
+Customers are created by storefront registration, never through a PAT:
+the operator surface is the list and the {status} PATCH, nothing else —
+no profile edits, no password writes. The users API is just the read-only
 `users/me` identity call (no user list, no profile writes). Do not guess at endpoints beyond these, and tell
 the user plainly when a request needs an API the store does not have yet.
 
@@ -463,18 +468,21 @@ GET    /api/v1/categories/{id}     one category
 PATCH  /api/v1/categories/{id}     partial update (send only changed fields)
 DELETE /api/v1/categories/{id}     delete; children are detached (parent_id → null), not deleted
 GET    /api/v1/products            list products; DEFAULT is active+visible only — add ?status=draft|active|archived|all for the rest, ?category={id} to filter by category
-POST   /api/v1/products            create a product ({name} required; slug derived; status defaults to draft; categories: [ids] sets membership)
+POST   /api/v1/products            create a product ({name} required; slug derived; status defaults to draft; categories: [ids] sets membership; stock defaults to null = NOT TRACKED — checkout never refuses an untracked product)
 GET    /api/v1/products/{id}       one product, any status; includes categories: [ids]
-PATCH  /api/v1/products/{id}       partial update; categories REPLACES membership ([] clears it; omit to keep)
+PATCH  /api/v1/products/{id}       partial update; categories REPLACES membership ([] clears it; omit to keep); stock: non-negative integer tracks inventory, null turns tracking off (negatives/floats are a 400)
 DELETE /api/v1/products/{id}       delete; its category-membership rows go with it
 GET    /api/v1/orders              list orders, NEWEST FIRST, all statuses by default — ?status=pending_payment|paid|processing|shipped|completed|cancelled|refunded|all, ?limit= (1-100, default 50), ?offset=
 GET    /api/v1/orders/{id}         one order + its items; items are purchase-time SNAPSHOTS (name, unit_price) — later product edits never change them; also payments: the order's payment attempts — payments[].id is the paymentId for the PATCH below
+PATCH  /api/v1/orders/{id}         move the order through its lifecycle: {status} only — processing|shipped|completed|cancelled|refunded; illegal moves are a 409; NEVER "paid" (that is the payments PATCH below); cancelled/refunded return TRACKED stock exactly once (an untracked product, stock null, stays untracked)
 PATCH  /api/v1/orders/{orderId}/payments/{paymentId} record that the money arrived: {status: "received", reference?} — the payment goes received, the order goes pending_payment → paid
 GET    /api/v1/payment-methods     list payment methods (sort_order, then name); ALL rows, disabled included — the operator view, not the checkout offer
 POST   /api/v1/payment-methods     create ({provider, name} required; instructions null, enabled 1, sort_order 0 by default)
 GET    /api/v1/payment-methods/{id} one method
 PATCH  /api/v1/payment-methods/{id} partial update (send only changed fields); an unknown field is a 400 unknown_field:<name>, never ignored
 DELETE /api/v1/payment-methods/{id} delete; past payments keep their provider/name snapshots, their method_id goes null
+GET    /api/v1/customers           list shopper accounts, NEWEST FIRST, active and disabled alike; rows carry id, email, name, status, created_at, updated_at — NEVER password_hash, never the live phone (fulfilment reads the order's captured contact details)
+PATCH  /api/v1/customers/{id}      enable/disable a shopper: {status: "active"|"disabled"} only — disabling kills EVERY live storefront session immediately, and re-enabling does NOT revive them (the shopper logs in again); idempotent (re-asserting the current status is a 200); unknown field is a 400 unknown_field:<name>
 GET    /api/v1/settings            the store's settings: exactly 15 fields (identity, contact, currency/locale/timezone, tax, analytics)
 PATCH  /api/v1/settings            partial update of those 15 fields; anything else in the body is ignored, not an error
 ```
@@ -541,8 +549,30 @@ Recording receipt (`PATCH /api/v1/orders/{orderId}/payments/{paymentId}`)
 is the loop: list orders with `?status=pending_payment`, GET the order,
 read `payments[].id` off it, PATCH. It accepts ONLY
 `status: "received"` — `failed` and `refunded` exist in the data model
-but are NOT settable in this release (400), and there is no other status
-transition of any kind: no refund, no cancel, no shipping update.
+but are NOT settable in this release (400). Order lifecycle moves —
+processing, shipping, completion, cancel, refund — are made with
+`PATCH /api/v1/orders/{id}` and `{status}` alone: legal moves are
+pending_payment → cancelled; paid → processing | cancelled | refunded;
+processing → shipped | cancelled | refunded; shipped → completed |
+refunded (no cancel once shipped — the goods are gone); completed →
+refunded; cancelled → refunded; refunded is terminal. An illegal move is
+a 409 and changes nothing, and `"paid"` is NEVER accepted there —
+recording receipt on the payment is the only route to paid. Cancelling
+or refunding returns each line's quantity to its product's stock exactly
+once per order (cancel-then-refund does not restock twice) — but ONLY
+for tracked products: an untracked product (stock null) stays untracked,
+nothing is written to it. A refund restocks even when the goods were not
+returned — for a tracked product, edit its stock down afterwards if they
+weren't; never "correct" an untracked product by writing a number, that
+silently turns tracking on for stock the merchant never counted.
+Before switching a product from untracked to tracked, settle or cancel
+its open orders FIRST: an order placed while the product was untracked
+decremented nothing, so cancelling or refunding it after a count is set
+adds units that were never taken — the system cannot tell such an order
+apart from one that really decremented. Note also that checkout
+decrements stock when the ORDER is placed, not when payment arrives:
+an abandoned `pending_payment` order holds its units until it is
+cancelled, and nothing expires it automatically.
 `reference` is optional plain text up to 200 characters (control bytes
 and angle brackets rejected; anything longer is a 400, NEVER truncated —
 it must match a bank statement byte for byte); omit it to keep a

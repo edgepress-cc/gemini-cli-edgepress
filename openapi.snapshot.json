@@ -955,6 +955,13 @@
           "sort_order": {
             "type": "integer"
           },
+          "stock": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Units in stock, or null for NOT TRACKED (untracked products are never refused at checkout). 0 = tracked and sold out."
+          },
           "created_at": {
             "type": "integer"
           },
@@ -1265,6 +1272,38 @@
           "available": {
             "type": "boolean",
             "description": "false when the line cannot be sold as-is — product archived, hidden, re-listed in a currency other than the cart's, or priced past the money ceiling. The line stays visible but is excluded from subtotal."
+          }
+        }
+      },
+      "StoreCustomer": {
+        "type": "object",
+        "description": "A shopper account, as the operator sees it. Deliberately partial: password_hash never crosses the API, and the account's live phone is withheld — fulfilment reads the contact details each order captured at checkout, the same call the orders API made.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "description": "A disabled shopper cannot log in, and every live storefront session dies the moment the account is disabled — re-enabling does not revive old sessions."
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "integer"
           }
         }
       }
@@ -10965,7 +11004,7 @@
             "description": "CSRF_INVALID (signed-in, bad or missing X-CSRF-Token) or cross_origin_rejected (guest POST from another origin)."
           },
           "409": {
-            "description": "cart_unavailable_items — the cart holds a line whose product is archived, hidden, off-currency or over the price ceiling; product_ids names them. Remove those lines and retry."
+            "description": "cart_unavailable_items — the cart holds a line whose product is archived, hidden, off-currency or over the price ceiling; product_ids names them. Remove those lines and retry. Or cart_insufficient_stock — a line asks for more units than the product has in stock; product_ids names the short lines (products with stock null are untracked and never refused). Reduce those quantities (or remove the lines) and retry. When a concurrent order took the last units mid-checkout the same code is returned with raced: true — there product_ids lists every line of the cart (the aborted transaction cannot say which line tripped), nothing was charged and the cart is intact."
           },
           "413": {
             "description": "body_too_large — the declared Content-Length exceeds the 16KB shop-API body cap."
@@ -11760,6 +11799,13 @@
                   "sort_order": {
                     "type": "integer"
                   },
+                  "stock": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Units in stock, or null for NOT TRACKED (the default; untracked products are never refused at checkout). Setting null turns tracking off. A negative or non-integer value is a 400. Checkout decrements tracked stock; cancelling or refunding an order returns it."
+                  },
                   "categories": {
                     "type": "array",
                     "items": {
@@ -12034,6 +12080,13 @@
                   },
                   "sort_order": {
                     "type": "integer"
+                  },
+                  "stock": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Units in stock, or null for NOT TRACKED (the default; untracked products are never refused at checkout). Setting null turns tracking off. A negative or non-integer value is a 400. Checkout decrements tracked stock; cancelling or refunding an order returns it."
                   },
                   "categories": {
                     "type": "array",
@@ -12333,7 +12386,7 @@
           "Store"
         ],
         "summary": "GET /api/v1/orders/{id}",
-        "description": "One order with its line items. Items render from their purchase-time snapshots (name, unit_price) — later product edits never change them, and the totals are what was charged. Another store's order id is a plain 404. The order itself is read-only — the one write is recording payment receipt at PATCH /api/v1/orders/{orderId}/payments/{paymentId}. The response also carries payments: the payment attempts on the order (id, provider, method_name_snapshot, status, amount, currency, reference, timestamps) — the payments[].id is the paymentId for PATCH /api/v1/orders/{orderId}/payments/{paymentId}; an order placed with no payment method has an empty array.",
+        "description": "One order with its line items. Items render from their purchase-time snapshots (name, unit_price) — later product edits never change them, and the totals are what was charged. Another store's order id is a plain 404. Status transitions are made with PATCH on this same path; recording payment receipt is PATCH /api/v1/orders/{orderId}/payments/{paymentId}. The response also carries payments: the payment attempts on the order (id, provider, method_name_snapshot, status, amount, currency, reference, timestamps) — the payments[].id is the paymentId for PATCH /api/v1/orders/{orderId}/payments/{paymentId}; an order placed with no payment method has an empty array.",
         "security": [
           {
             "bearerAuth": []
@@ -12478,6 +12531,171 @@
             }
           }
         }
+      },
+      "patch": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PATCH /api/v1/orders/{id}",
+        "description": "Move the order through its lifecycle: body is exactly {status} — one of processing, shipped, completed, cancelled, refunded. Legal moves: pending_payment → cancelled; paid → processing | cancelled | refunded; processing → shipped | cancelled | refunded; shipped → completed | refunded (cancel is unavailable once shipped — the goods are gone, refund is the path); completed → refunded; cancelled → refunded; refunded is terminal. An illegal move is a 409 and changes nothing. 'paid' is NEVER settable here — recording payment receipt (PATCH /api/v1/orders/{orderId}/payments/{paymentId}) is the only route to paid, and asking for it is a 409. Both cancelled and refunded return each line's quantity to its product's stock, exactly once per order — the ordinary cancelled → refunded sequence does not restock twice, and the order's restocked_at records when stock came back. Only TRACKED products are touched: an untracked product (stock null) stays untracked, nothing is written to it. Refunding restocks even when the goods were not returned: for a tracked product, correct its stock field afterwards if they weren't — never by writing a number onto an untracked product, which would silently turn tracking on. If the order's status changed concurrently between read and write, the call is a 409 and changes nothing — re-read and retry. An unknown body field is a 400 unknown_field:<name>, never silently ignored. Another store's order id, an unknown id or a malformed id is a plain 404. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "processing",
+                      "shipped",
+                      "completed",
+                      "cancelled",
+                      "refunded"
+                    ],
+                    "description": "The target status. 'paid' and 'pending_payment' are not settable here: paid is reached only by recording payment receipt, and nothing returns to pending_payment."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK — the order is in the requested status; if it was cancelled or refunded and had not been restocked before, its line quantities are back in stock",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "id": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed: the body was not a JSON object, status was missing or not a known order status, or an unknown field was sent (unknown_field:<name>)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "404": {
+            "description": "No such order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The move is not legal from the order's current status (Cannot transition <from> -> <to>), status was 'paid' — which only recording payment receipt can set — or the order's status changed concurrently while the transition was processing (nothing happened; re-read and retry)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Store not yet provisioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/orders/{orderId}/payments/{paymentId}": {
@@ -12504,7 +12722,7 @@
           "Store"
         ],
         "summary": "PATCH /api/v1/orders/{orderId}/payments/{paymentId}",
-        "description": "Record that the money for an offline payment arrived: the payment goes 'received' and the order goes pending_payment → paid. Accepts ONLY status: 'received' — 'failed' and 'refunded' exist in the data model but are not settable in this release, and no other order status transition of any kind is available. Idempotent: repeating the call returns 200, and an order that has already moved past pending_payment (e.g. shipped) is never dragged back to paid — only the payment row updates. Recording receipt on a cancelled or refunded order is a 409 — the money already left, and a received payment on a dead order would be a silent contradiction. An unknown body field is rejected with 400 unknown_field:<name>, never silently ignored, and a reference over 200 characters is a 400, never truncated. The payment must belong to the order in the URL and to this store; any mismatch, unknown id or malformed id is a plain 404. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "description": "Record that the money for an offline payment arrived: the payment goes 'received' and the order goes pending_payment → paid. Accepts ONLY status: 'received' — 'failed' and 'refunded' exist in the data model but are not settable in this release; other ORDER status transitions are made with PATCH /api/v1/orders/{id}, but this call remains the only route to paid. Idempotent: repeating the call returns 200, and an order that has already moved past pending_payment (e.g. shipped) is never dragged back to paid — only the payment row updates. Recording receipt on a cancelled or refunded order is a 409 — the money already left, and a received payment on a dead order would be a silent contradiction. An unknown body field is rejected with 400 unknown_field:<name>, never silently ignored, and a reference over 200 characters is a 400, never truncated. The payment must belong to the order in the URL and to this store; any mismatch, unknown id or malformed id is a plain 404. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
         "security": [
           {
             "bearerAuth": []
@@ -13446,6 +13664,191 @@
           },
           "404": {
             "description": "Not found. Returned by store tenants, which do not support PATCH at this path."
+          }
+        }
+      }
+    },
+    "/api/v1/customers": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/customers",
+        "description": "List the store's shopper accounts, newest first — active and disabled alike. Rows never include password_hash or the account's live phone number. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StoreCustomer"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Store not yet provisioned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/customers/{id}": {
+      "patch": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PATCH /api/v1/customers/{id}",
+        "description": "Enable or disable a shopper account: body is exactly {status} — 'active' or 'disabled'. Disabling destroys every live storefront session the shopper holds, immediately — and re-enabling does NOT revive them: the shopper must log in again. Idempotent: re-asserting the current status is a 200, not a 409. An unknown body field is a 400 unknown_field:<name>, never silently ignored. Another store's customer id, an unknown id or a malformed id is a plain 404. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "disabled"
+                    ],
+                    "description": "The target status. Disabling kills all live sessions; re-enabling restores the ability to log in, never old sessions."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "id": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "active",
+                        "disabled"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — bad status value, unknown field, or a non-object body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "404": {
+            "description": "No such customer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }
