@@ -15,7 +15,7 @@ export EDGEPRESS_TENANT=your-subdomain.edgepress.cc
 export EDGEPRESS_TOKEN=epat_...
 ```
 
-Mint a token at `<tenant>/admin/account/api-tokens`.
+Mint a token at `<tenant>/admin/settings/api-tokens`.
 
 ## Use
 

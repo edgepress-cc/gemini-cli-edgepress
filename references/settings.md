@@ -41,11 +41,33 @@ ep PUT /settings/public-signup '{"enabled":true}'
 ]
 ```
 
+## Theme settings
+
+Two keys are validated on PUT/POST (the only ones that are):
+
+| Key | Shape |
+|---|---|
+| `theme_palette` | `{primary, accent, text, background, muted, surface}` — each `#rrggbb` |
+| `theme_fonts` | `{body, heading, mono}` — each a self-hosted family name or `"system"` |
+
+Every key inside is optional; unknown keys are rejected. Send the object or
+its JSON string — both are accepted, and both are stored as the JSON string:
+
+```json
+{"option_name":"theme_palette","option_value":{"primary":"#1d4ed8","accent":"#f59e0b"}}
+```
+
+`""` or `null` clears the key (the site falls back to its defaults). A bad
+value returns `400 {"success":false,"error":"invalid_theme_setting","detail":"theme_palette.primary: invalid value."}`
+and writes nothing — in a multi-key PUT, none of the keys in that body are
+written. Read the stored result back with `GET /settings`.
+
 ## Gotchas
 
-- **All values are strings.** Booleans arrive as `"true"`/`"false"`, numbers
-  as `"42"`. Compare and write them as strings; don't send raw JSON booleans
-  in `option_value`.
+- **All values are strings** — except the two theme keys above, which also
+  accept an object. Booleans arrive as `"true"`/`"false"`, numbers as `"42"`.
+  Compare and write them as strings; don't send raw JSON booleans in
+  `option_value`.
 - **Update is PUT `/settings`** (not PATCH) with `{option_name,
   option_value}`. Unlike content PUTs, this touches only the key you name —
   other settings are untouched. Still: send one key at a time and read back.
@@ -58,7 +80,8 @@ ep PUT /settings/public-signup '{"enabled":true}'
   (`/settings/public-signup`) — prefer it over writing
   `public_signup_enabled` directly, since it applies validation.
 - There is no schema for option names: a typo'd `option_name` on PUT/POST
-  quietly creates a new, unused row instead of erroring. Read the existing
-  keys first and match names exactly.
+  quietly creates a new, unused row instead of erroring (only the values of
+  `theme_palette`/`theme_fonts` are checked, and only under those exact
+  names). Read the existing keys first and match names exactly.
 - Deleting a load-bearing key (e.g. `site_title`) breaks rendering with no
   API-side guard. Only DELETE rows the user explicitly names, and confirm.

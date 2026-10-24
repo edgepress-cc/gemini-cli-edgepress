@@ -3,6 +3,11 @@
 Personal access tokens (PATs, `epat_...`). The plugin can LIST tokens for an
 audit, and that is all: creating and revoking tokens is session-only.
 
+Applies to BOTH products. A store tenant serves the same three endpoints
+under `/api/v1/api-tokens` (the only path there — `ep` adds the prefix),
+with the same envelope, the same 403 `session_required` rule and the same
+admin UI URL, `https://<tenant>/admin/settings/api-tokens`.
+
 ## Endpoints
 
 | Method | Path | Purpose |
