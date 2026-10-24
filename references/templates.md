@@ -43,7 +43,7 @@ use the standard envelope: `{"success":true,"template":{…}}`.
 
 ## Build order
 
-1. `ep GET /blocks` — learn what block types exist (20 registered).
+1. `ep GET /blocks` — learn what block types exist (44 registered; the live list is authoritative).
 2. `ep GET /blocks/<type>/schema` for each type you plan to use. A
    `404 unknown_block_type` means that block's settings are neither documented
    nor validated — its config is free-form, so read the block back to confirm.
@@ -73,6 +73,29 @@ use the standard envelope: `{"success":true,"template":{…}}`.
    not you call this.
 8. `ep PUT /pages/<pageId>/template '{"templateId":"<id>"}'` to put it on a page
    (`{"templateId":null}` to take it off again).
+
+### Newer block types and keys
+
+New types (read each schema with `GET /blocks/<type>/schema`):
+
+- `pullquote` — text, citation, alignment.
+- `code` — text, language label, `variant` code / preformatted / verse.
+- `list` — `ordered`, `start`, `reversed`, `items[{html, items}]` nested up to 3 levels; item HTML is sanitised. Limits: 200 top-level items, 100 per nested level, 2000 chars of `html` per item.
+- `table` — head/body/foot rows of cell HTML, caption, `striped`, `fixedLayout`. Limits: head ≤10 rows, body ≤500, foot ≤10; ≤30 cells per row; ≤5000 chars per cell.
+- `embed` — https URL only. YouTube (no-cookie), Vimeo, Spotify, SoundCloud, TikTok, Instagram and X become an iframe; anything else becomes a link card. `provider` is a hint only. `caption` (≤500 chars); `aspectRatio` 16:9 / 4:3 / 1:1 / 9:16 / 21:9, applied only where the provider has no fixed size (YouTube, Vimeo) — Spotify, SoundCloud, X, TikTok and Instagram keep their own.
+- `file` — url, label, download button; inline PDF only for same-site URLs.
+- `media-text` — mediaUrl/Alt/Type, `mediaPosition`, `mediaWidth` 15-85, `verticalAlign`, `imageFill`, `focalPoint`, `stackOnMobile`, child blocks.
+- `details` — `summary`, `open`, child blocks.
+
+New keys on existing types:
+
+- `container` (Group): `tag`, `layout` flow / flex-row / flex-column / grid, `justify`, `align`, `wrap`, `columns`, `gap`.
+- `columns`: per-column `width` (% or fr) and `verticalAlign`; row `verticalAlign`; `reverseOnMobile`.
+- `hero`: `blocks` replaces title, subtitle and buttons in the output, but the schema still requires `title` (`required: ["title"]`, `minLength 1`) — pass a short one; `backgroundType: "video"` with `backgroundVideo {url, poster}`; `backgroundImage.focalPoint` and visibility are honoured.
+- `gallery`: `crop`; `link` none / media / lightbox.
+- `video`: `poster`, `loop`, `muted`, `controls`, `playsinline`; `aspectRatio` 21:9.
+
+Site setting `wp_presets` — `{"colors":{slug:"#rrggbb"},"fontSizes":{slug:"<css length or clamp/min/max>"}}` — drives the WordPress `has-*` classes in imported post bodies; invalid entries are dropped.
 
 ## GraphQL — full power and what REST omits
 

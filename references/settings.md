@@ -62,6 +62,17 @@ value returns `400 {"success":false,"error":"invalid_theme_setting","detail":"th
 and writes nothing — in a multi-key PUT, none of the keys in that body are
 written. Read the stored result back with `GET /settings`.
 
+## Weather key
+
+`weather_api_key` is the site's own weatherapi.com key, used by the ticker
+block's weather readout. It is **write-only**: set it with
+`PUT /settings {"option_name":"weather_api_key","option_value":"<key>","autoload":"no"}`
+(admin only). `GET /settings`, `GET /settings/public` and `?name=weather_api_key`
+never return it; the name lookup answers 404. To check it works, call
+`GET /api/weather?city=<ticker city>`: 200 with `{city, temp_c, is_day}`, or
+404 `{"error":"not_configured"}` when no key is set. Never put a key in the
+ticker block config; the schema rejects `weatherApiKey`.
+
 ## Gotchas
 
 - **All values are strings** — except the two theme keys above, which also
