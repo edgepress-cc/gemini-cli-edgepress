@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgePress Tenant API",
-    "version": "1.51.0",
+    "version": "1.51.1",
     "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`."
   },
   "servers": [
@@ -40208,7 +40208,7 @@
           "Onboarding"
         ],
         "summary": "Apply a starter design (admin)",
-        "description": "Applies the design's templates, its starter pages (only those listed) and the theme, in one atomic write. Makes the design's home the default and moves the site's templates onto the design's base layout. A starter page whose slug already exists replaces it only while that page is still the untouched setup placeholder (its publication status is kept); any other existing page is skipped, never overwritten. Existing posts are never modified; with removeSamples, the sample posts created at setup (and only those) are deleted in the same write.",
+        "description": "Applies the design's templates, its starter pages (only those listed) and the theme, in one atomic write. Makes the design's home the default and writes the design's header and footer into the site's base layout (default-base), which every template inherits from. A starter page whose slug already exists replaces it only while that page is still the untouched setup placeholder (its publication status is kept); any other existing page is skipped, never overwritten. Existing posts are never modified; with removeSamples, the sample posts created at setup (and only those) are deleted in the same write.",
         "requestBody": {
           "required": true,
           "content": {
