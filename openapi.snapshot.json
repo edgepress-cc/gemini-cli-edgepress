@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgePress Tenant API",
-    "version": "1.49.0",
+    "version": "1.51.0",
     "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`."
   },
   "servers": [
@@ -5509,6 +5509,53 @@
                 "type": "string"
               }
             }
+          }
+        }
+      },
+      "Onboarding": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "wordpress"
+            ]
+          },
+          "source_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "done"
+            ]
+          },
+          "step": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "checklist_dismissed": {
+            "type": "boolean"
+          },
+          "design": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "lang": {
+                "type": "string"
+              }
+            }
+          },
+          "scan": {
+            "type": "object",
+            "description": "Last WordPress preflight report (P2c)."
           }
         }
       }
@@ -40025,6 +40072,255 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/onboarding": {
+      "get": {
+        "tags": [
+          "Onboarding"
+        ],
+        "summary": "First-run wizard state (admin)",
+        "description": "Returns the onboarding row, or null on a site that predates the wizard (treated as done), plus a computed setup checklist.",
+        "responses": {
+          "200": {
+            "description": "State",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "onboarding": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "$ref": "#/components/schemas/Onboarding"
+                        }
+                      ]
+                    },
+                    "checklist": {
+                      "oneOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "logo": {
+                              "type": "boolean"
+                            },
+                            "design": {
+                              "type": "boolean"
+                            },
+                            "first_post": {
+                              "type": "boolean"
+                            },
+                            "about_page": {
+                              "type": "boolean"
+                            },
+                            "custom_domain": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Not an admin"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Onboarding"
+        ],
+        "summary": "Move the wizard (admin)",
+        "description": "Only state, step and checklist_dismissed are writable. path, source_url, design and scan are server-owned.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "done"
+                    ]
+                  },
+                  "step": {
+                    "oneOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "identity",
+                          "design",
+                          "look",
+                          "pages",
+                          "first-post",
+                          "wp-connect",
+                          "wp-report"
+                        ]
+                      }
+                    ]
+                  },
+                  "checklist_dismissed": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated row"
+          },
+          "400": {
+            "description": "Invalid or non-writable key"
+          },
+          "403": {
+            "description": "Not an admin"
+          }
+        }
+      }
+    },
+    "/api/onboarding/design": {
+      "post": {
+        "tags": [
+          "Onboarding"
+        ],
+        "summary": "Apply a starter design (admin)",
+        "description": "Applies the design's templates, its starter pages (only those listed) and the theme, in one atomic write. Makes the design's home the default and moves the site's templates onto the design's base layout. A starter page whose slug already exists replaces it only while that page is still the untouched setup placeholder (its publication status is kept); any other existing page is skipped, never overwritten. Existing posts are never modified; with removeSamples, the sample posts created at setup (and only those) are deleted in the same write.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "design",
+                  "lang"
+                ],
+                "properties": {
+                  "design": {
+                    "type": "string",
+                    "enum": [
+                      "magazine",
+                      "blog",
+                      "business"
+                    ]
+                  },
+                  "lang": {
+                    "type": "string",
+                    "enum": [
+                      "he",
+                      "en"
+                    ]
+                  },
+                  "pages": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Starter page slugs to create; omit for all."
+                  },
+                  "palette": {
+                    "type": "object",
+                    "description": "theme_palette value; defaults to the design's."
+                  },
+                  "fonts": {
+                    "type": "object",
+                    "description": "theme_fonts value; defaults to the design's."
+                  },
+                  "removeSamples": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Also delete the lorem-ipsum sample posts the site was created with. Posts you wrote or edited are kept."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied"
+          },
+          "400": {
+            "description": "Unknown design/lang, invalid pages/removeSamples or invalid theme"
+          },
+          "403": {
+            "description": "Not an admin"
+          }
+        }
+      }
+    },
+    "/api/onboarding/wp-scan": {
+      "post": {
+        "tags": [
+          "Onboarding"
+        ],
+        "summary": "WordPress preflight scan (admin)",
+        "description": "Scans a WordPress site's public REST API and home page and stores the report on the onboarding row. An Application Password (https only) unlocks drafts, menus, templates and global styles; it is used for this request only and never stored or returned. Limited to 5 scans per site per hour.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Defaults to the onboarding row's source_url."
+                  },
+                  "username": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "app_password": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "writeOnly": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The report (see Onboarding.scan)"
+          },
+          "400": {
+            "description": "Missing URL or malformed fields"
+          },
+          "403": {
+            "description": "Not an admin"
+          },
+          "422": {
+            "description": "The site could not be scanned; detail says why"
+          },
+          "429": {
+            "description": "More than 5 scans this hour"
           }
         }
       }

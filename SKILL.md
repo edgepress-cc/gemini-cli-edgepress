@@ -501,6 +501,21 @@ Only approved reviews render on the product page, and the page's star
 rating IS their average — there is no rating to set by hand. Moderation is
 audited (`review.status`, `review.delete`). Listing works with a read-only
 PAT; PATCH/DELETE need a write-capable one.
+### Onboarding — CMS
+
+```
+GET  /onboarding                 first-run wizard state + dashboard checklist (admin)
+PUT  /onboarding                 { state?, step?, checklist_dismissed? } — nothing else is writable
+POST /onboarding/design          { design, lang, pages?, palette?, fonts?, removeSamples? } — apply a starter design
+POST /onboarding/wp-scan         { url?, username?, app_password? } — WordPress preflight scan, 5 per site per hour
+```
+
+All four are admin only. The scan stores its report (counts, theme, fidelity, palette) on the
+onboarding row and returns it; a site that cannot be scanned is a 422 whose
+`detail` says why. The Application Password (https only) is used for that one
+request and is **never stored or returned** — never log it or echo it back
+to the user either.
+
 ### Templates (GraphQL) — CMS
 
 ```
