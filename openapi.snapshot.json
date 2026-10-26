@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgePress Tenant API",
-    "version": "1.54.0",
+    "version": "1.55.0",
     "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`."
   },
   "servers": [
@@ -40212,7 +40212,7 @@
           "Onboarding"
         ],
         "summary": "Apply a starter or imported WordPress design (admin)",
-        "description": "Applies the design's templates, its starter pages (only those listed) and the theme, in one atomic write. Makes the design's home the default and writes the design's header and footer into the site's base layout (default-base), which every template inherits from. A starter page whose slug already exists replaces it only while that page is still the untouched setup placeholder (its publication status is kept); any other existing page is skipped, never overwritten. Existing posts are never modified; with removeSamples, the sample posts created at setup (and only those) are deleted in the same write. With design 'wordpress', applies the latest design stored by a WordPress import (GET /api/import/wordpress/design) through the same write, but keeps the imported logo and site name instead of carrying over the current header's; lang is not used.",
+        "description": "Applies the design's templates, its starter pages (only those listed) and the theme, in one atomic write. Makes the design's home the default and writes the design's header and footer into the site's base layout (default-base), which every template inherits from. A starter page whose slug already exists replaces it only while that page is still the untouched setup placeholder (its publication status is kept); any other existing page is skipped, never overwritten. Existing posts are never modified; with removeSamples, the sample posts created at setup (and only those) are deleted in the same write. With design 'wordpress', applies the latest design stored by a WordPress import (GET /api/import/wordpress/design) through the same write, but keeps the imported logo and site name instead of carrying over the current header's; lang is not used. It also switches the home page to the imported home template (when one was converted) and, when the import chose to apply landing pages with the design, creates their templates and links each page to its own; a page edited since conversion is left alone and its title is listed in the response's `unlinked` array (always present, empty when nothing was left).",
         "requestBody": {
           "required": true,
           "content": {
@@ -40342,7 +40342,7 @@
           "Import"
         ],
         "summary": "Start a WordPress import (admin)",
-        "description": "Creates the site's WordPress content import job (posts, pages, categories, tags, content-referenced media, redirects). The URL defaults to the onboarding row's source_url and is re-based to the site's canonical origin (http to https, www/apex twin). An Application Password (https only) is checked against wp/v2/users/me, stored sealed only until the import finishes or is cancelled, then deleted; it is never returned. One active import per site. Limited to 5 creates per site per hour. With scope 'all' the content stages end in a design stage that builds the source site's shell as a stored design (see GET /api/import/wordpress/design); a design failure never undoes content.",
+        "description": "Creates the site's WordPress content import job (posts, pages, categories, tags, content-referenced media, redirects). The URL defaults to the onboarding row's source_url and is re-based to the site's canonical origin (http to https, www/apex twin). An Application Password (https only) is checked against wp/v2/users/me, stored sealed only until the import finishes or is cancelled, then deleted; it is never returned. One active import per site. Limited to 5 creates per site per hour. With scope 'all' the content stages end in a design stage that builds the source site's shell as a stored design (see GET /api/import/wordpress/design); a design failure never undoes content. After the shell, the design stage converts the front page into a home template and landing pages (mostly layout blocks, at most 20) into one template each; prose, classic-editor and page-builder pages keep their imported HTML, and a page's content is never changed.",
         "responses": {
           "201": {
             "description": "The new job",
@@ -40417,7 +40417,61 @@
                                   "items": {
                                     "type": "string"
                                   },
-                                  "description": "What did not carry over, e.g. menu_missing, logo_missing, font_swapped:…, design_failed:…"
+                                  "description": "What did not carry over, e.g. menu_missing, logo_missing, font_swapped:…, design_failed:…, pages_failed:…"
+                                },
+                                "pages": {
+                                  "type": "object",
+                                  "description": "The design stage's pages phase (P4b): which pages were converted to native blocks and which keep their imported HTML.",
+                                  "properties": {
+                                    "converted": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "page_id": {
+                                            "type": [
+                                              "integer",
+                                              "null"
+                                            ],
+                                            "description": "This site's page; null for a home built from 'Latest posts' or from a page that was not imported"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "kept_as_text": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "reason": {
+                                            "type": "string",
+                                            "enum": [
+                                              "prose",
+                                              "classic",
+                                              "builder",
+                                              "failed"
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "notes": {
+                                      "type": "object",
+                                      "additionalProperties": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "description": "By page title: page_failed:…, page_too_large:…, page_edited:…, page_truncated:…, image_not_copied, effect_dropped:…, placeholder:…, html_kept:…"
+                                    }
+                                  }
                                 }
                               }
                             }
@@ -40437,7 +40491,7 @@
             }
           },
           "400": {
-            "description": "Malformed fields, invalid_url, https_required, or login_failed (WordPress rejected the username/Application Password)"
+            "description": "Malformed fields (including a pages_mode other than with_design, now or per_page), invalid_url, https_required, or login_failed (WordPress rejected the username/Application Password)"
           },
           "401": {
             "description": "Not signed in"
@@ -40487,6 +40541,16 @@
                     ],
                     "default": "all",
                     "description": "'design' imports only the site's design (palette, fonts, logo, menu, header and footer): the job starts in state design and no content is pulled."
+                  },
+                  "pages_mode": {
+                    "type": "string",
+                    "enum": [
+                      "with_design",
+                      "now",
+                      "per_page"
+                    ],
+                    "default": "with_design",
+                    "description": "When converted landing pages go live (P4b). with_design: when the imported design is applied; now: when the import finishes (each page is linked to its converted layout, unless edited since); per_page: the layouts are created and each page's editor switches to them. The home page always waits for the design to be applied. Any other value is 400."
                   }
                 }
               }
@@ -40576,7 +40640,61 @@
                                   "items": {
                                     "type": "string"
                                   },
-                                  "description": "What did not carry over, e.g. menu_missing, logo_missing, font_swapped:…, design_failed:…"
+                                  "description": "What did not carry over, e.g. menu_missing, logo_missing, font_swapped:…, design_failed:…, pages_failed:…"
+                                },
+                                "pages": {
+                                  "type": "object",
+                                  "description": "The design stage's pages phase (P4b): which pages were converted to native blocks and which keep their imported HTML.",
+                                  "properties": {
+                                    "converted": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "page_id": {
+                                            "type": [
+                                              "integer",
+                                              "null"
+                                            ],
+                                            "description": "This site's page; null for a home built from 'Latest posts' or from a page that was not imported"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "kept_as_text": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "reason": {
+                                            "type": "string",
+                                            "enum": [
+                                              "prose",
+                                              "classic",
+                                              "builder",
+                                              "failed"
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "notes": {
+                                      "type": "object",
+                                      "additionalProperties": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "description": "By page title: page_failed:…, page_too_large:…, page_edited:…, page_truncated:…, image_not_copied, effect_dropped:…, placeholder:…, html_kept:…"
+                                    }
+                                  }
                                 }
                               }
                             }
@@ -40773,7 +40891,61 @@
                                   "items": {
                                     "type": "string"
                                   },
-                                  "description": "What did not carry over, e.g. menu_missing, logo_missing, font_swapped:…, design_failed:…"
+                                  "description": "What did not carry over, e.g. menu_missing, logo_missing, font_swapped:…, design_failed:…, pages_failed:…"
+                                },
+                                "pages": {
+                                  "type": "object",
+                                  "description": "The design stage's pages phase (P4b): which pages were converted to native blocks and which keep their imported HTML.",
+                                  "properties": {
+                                    "converted": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "page_id": {
+                                            "type": [
+                                              "integer",
+                                              "null"
+                                            ],
+                                            "description": "This site's page; null for a home built from 'Latest posts' or from a page that was not imported"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "kept_as_text": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "reason": {
+                                            "type": "string",
+                                            "enum": [
+                                              "prose",
+                                              "classic",
+                                              "builder",
+                                              "failed"
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "notes": {
+                                      "type": "object",
+                                      "additionalProperties": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "description": "By page title: page_failed:…, page_too_large:…, page_edited:…, page_truncated:…, image_not_copied, effect_dropped:…, placeholder:…, html_kept:…"
+                                    }
+                                  }
                                 }
                               }
                             }
@@ -40901,7 +41073,61 @@
                                   "items": {
                                     "type": "string"
                                   },
-                                  "description": "What did not carry over, e.g. menu_missing, logo_missing, font_swapped:…, design_failed:…"
+                                  "description": "What did not carry over, e.g. menu_missing, logo_missing, font_swapped:…, design_failed:…, pages_failed:…"
+                                },
+                                "pages": {
+                                  "type": "object",
+                                  "description": "The design stage's pages phase (P4b): which pages were converted to native blocks and which keep their imported HTML.",
+                                  "properties": {
+                                    "converted": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "page_id": {
+                                            "type": [
+                                              "integer",
+                                              "null"
+                                            ],
+                                            "description": "This site's page; null for a home built from 'Latest posts' or from a page that was not imported"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "kept_as_text": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "reason": {
+                                            "type": "string",
+                                            "enum": [
+                                              "prose",
+                                              "classic",
+                                              "builder",
+                                              "failed"
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "notes": {
+                                      "type": "object",
+                                      "additionalProperties": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "description": "By page title: page_failed:…, page_too_large:…, page_edited:…, page_truncated:…, image_not_copied, effect_dropped:…, placeholder:…, html_kept:…"
+                                    }
+                                  }
                                 }
                               }
                             }
@@ -41029,7 +41255,61 @@
                                   "items": {
                                     "type": "string"
                                   },
-                                  "description": "What did not carry over, e.g. menu_missing, logo_missing, font_swapped:…, design_failed:…"
+                                  "description": "What did not carry over, e.g. menu_missing, logo_missing, font_swapped:…, design_failed:…, pages_failed:…"
+                                },
+                                "pages": {
+                                  "type": "object",
+                                  "description": "The design stage's pages phase (P4b): which pages were converted to native blocks and which keep their imported HTML.",
+                                  "properties": {
+                                    "converted": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "page_id": {
+                                            "type": [
+                                              "integer",
+                                              "null"
+                                            ],
+                                            "description": "This site's page; null for a home built from 'Latest posts' or from a page that was not imported"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "kept_as_text": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "reason": {
+                                            "type": "string",
+                                            "enum": [
+                                              "prose",
+                                              "classic",
+                                              "builder",
+                                              "failed"
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "notes": {
+                                      "type": "object",
+                                      "additionalProperties": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "description": "By page title: page_failed:…, page_too_large:…, page_edited:…, page_truncated:…, image_not_copied, effect_dropped:…, placeholder:…, html_kept:…"
+                                    }
+                                  }
                                 }
                               }
                             }
@@ -41082,7 +41362,7 @@
           "Import"
         ],
         "summary": "Get the imported WordPress design (admin)",
-        "description": "The newest design a WordPress import built: a template bundle (base layout with the navigation and footer blocks), the theme palette and fonts, and notes on what did not carry over.",
+        "description": "The newest design a WordPress import built: a template bundle (base layout with the navigation and footer blocks), the theme palette and fonts, and notes on what did not carry over. With P4b the bundle also carries a `home` template (slug wordpress-home-<job>) and one `custom` template per converted landing page (slug wordpress-page-<page>-j<job>). A design whose import is still converting pages is never returned; the previous complete design (or 404) is, until it finishes.",
         "responses": {
           "200": {
             "description": "The design",
@@ -41131,6 +41411,46 @@
                         "html"
                       ],
                       "description": "api: read through the REST API with the Application Password; html: from the rendered home page only"
+                    },
+                    "pages_mode": {
+                      "type": "string",
+                      "enum": [
+                        "with_design",
+                        "now",
+                        "per_page"
+                      ],
+                      "description": "The import's go-live choice for converted landing pages"
+                    },
+                    "phase": {
+                      "type": "string",
+                      "enum": [
+                        "done"
+                      ],
+                      "description": "Always done here: a design still in its pages phase is not returned"
+                    },
+                    "pages": {
+                      "type": "array",
+                      "description": "Converted landing pages: each one's template is bundle template `ref`; updated_at is the page's value when converted (a page edited since is not linked)",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "page_id": {
+                            "type": "integer"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "ref": {
+                            "type": "string"
+                          },
+                          "updated_at": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
                     }
                   }
                 }
