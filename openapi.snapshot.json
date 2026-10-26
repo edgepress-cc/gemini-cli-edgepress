@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgePress Tenant API",
-    "version": "1.52.0",
+    "version": "1.53.0",
     "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`."
   },
   "servers": [
@@ -40100,6 +40100,10 @@
                           "$ref": "#/components/schemas/Onboarding"
                         }
                       ]
+                    },
+                    "owner": {
+                      "type": "boolean",
+                      "description": "True when the caller is the site owner (the first platform-linked, non-support admin). Only the owner is sent into a pending wizard; support and collaborator admins are not."
                     },
                     "checklist": {
                       "oneOf": [
