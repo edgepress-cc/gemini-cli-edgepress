@@ -516,6 +516,23 @@ onboarding row and returns it; a site that cannot be scanned is a 422 whose
 request and is **never stored or returned** — never log it or echo it back
 to the user either.
 
+### WordPress import — CMS
+
+```
+POST /import/wordpress               { url?, username?, app_password? } — start; 201 { job }, 5 per site per hour
+GET  /import/wordpress/{id}          { job: { id, source_url, state, counts, last_error, report, … } }
+POST /import/wordpress/{id}/step     one unit of work; call until state is "done" ({ busy: true } = retry)
+POST /import/wordpress/{id}/pause    POST …/resume    POST …/cancel
+```
+
+All admin only; one active import per site (409 `import_active` with its
+`job_id`). Add-only: content already on the site is never modified; a re-run
+imports only what is new. Three failed steps in a row pause the job — read
+`last_error`, then resume. The Application Password (https only) is stored
+encrypted only until the import finishes or is cancelled, then deleted; it is
+**never returned** — never log or echo it. 503 `import_unavailable` is an
+operator problem (tables or key), not something to retry in a loop.
+
 ### Templates (GraphQL) — CMS
 
 ```

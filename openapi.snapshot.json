@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgePress Tenant API",
-    "version": "1.51.1",
+    "version": "1.52.0",
     "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`."
   },
   "servers": [
@@ -40323,6 +40323,587 @@
             "description": "More than 5 scans this hour"
           }
         }
+      }
+    },
+    "/api/import/wordpress": {
+      "post": {
+        "tags": [
+          "Import"
+        ],
+        "summary": "Start a WordPress import (admin)",
+        "description": "Creates the site's WordPress content import job (posts, pages, categories, tags, content-referenced media, redirects). The URL defaults to the onboarding row's source_url and is re-based to the site's canonical origin (http to https, www/apex twin). An Application Password (https only) is checked against wp/v2/users/me, stored sealed only until the import finishes or is cancelled, then deleted; it is never returned. One active import per site. Limited to 5 creates per site per hour.",
+        "responses": {
+          "201": {
+            "description": "The new job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "source_url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "pulling",
+                            "applying",
+                            "media",
+                            "links",
+                            "paused",
+                            "done",
+                            "cancelled"
+                          ]
+                        },
+                        "counts": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "description": "Per-kind imported/skipped/failed counts"
+                        },
+                        "last_error": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "The last failure, redacted of the Application Password"
+                        },
+                        "report": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "additionalProperties": true,
+                          "description": "Set when the import is done"
+                        },
+                        "created_at": {
+                          "type": "integer"
+                        },
+                        "updated_at": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed fields, invalid_url, https_required, or login_failed (WordPress rejected the username/Application Password)"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Not an admin"
+          },
+          "409": {
+            "description": "An import is already active ({error:'import_active', job_id}). Checked first: it makes no outbound call and does not count against the rate limit, so a client may use it to find the running import"
+          },
+          "422": {
+            "description": "source_unreachable, source_moved (the site lives at another host; detail says where) or rest_unavailable"
+          },
+          "429": {
+            "description": "More than 5 creates this hour"
+          },
+          "503": {
+            "description": "Import unavailable: tables not yet migrated, or the credential key is missing or rotated ({error:'import_unavailable'})"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "Defaults to the onboarding row's source_url."
+                  },
+                  "username": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "app_password": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "writeOnly": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/import/wordpress/{id}": {
+      "get": {
+        "tags": [
+          "Import"
+        ],
+        "summary": "Get a WordPress import (admin)",
+        "description": "The job's state, counts, redacted last error and (when done) report. Never credential data.",
+        "responses": {
+          "200": {
+            "description": "The job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "source_url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "pulling",
+                            "applying",
+                            "media",
+                            "links",
+                            "paused",
+                            "done",
+                            "cancelled"
+                          ]
+                        },
+                        "counts": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "description": "Per-kind imported/skipped/failed counts"
+                        },
+                        "last_error": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "The last failure, redacted of the Application Password"
+                        },
+                        "report": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "additionalProperties": true,
+                          "description": "Set when the import is done"
+                        },
+                        "created_at": {
+                          "type": "integer"
+                        },
+                        "updated_at": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Not an admin"
+          },
+          "404": {
+            "description": "Unknown import ({error:'not_found'})"
+          },
+          "503": {
+            "description": "Import unavailable: tables not yet migrated, or the credential key is missing or rotated ({error:'import_unavailable'})"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/import/wordpress/{id}/step": {
+      "post": {
+        "tags": [
+          "Import"
+        ],
+        "summary": "Run one import step (admin)",
+        "description": "Does one bounded unit of work for the current stage (pull one REST page, apply 25 rows, copy 10 media files, or rewrite links). Call repeatedly until state is done. Three consecutive failures pause the job. Not rate limited.",
+        "responses": {
+          "200": {
+            "description": "The step result; or {busy:true} while another step holds the lease; or {state, done} when the job is paused, cancelled or done (no-op)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string"
+                    },
+                    "stage": {
+                      "type": "string",
+                      "description": "The stage this call worked on"
+                    },
+                    "counts": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "progress": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "last_error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "done": {
+                      "type": "boolean"
+                    },
+                    "busy": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Not an admin"
+          },
+          "404": {
+            "description": "Unknown import ({error:'not_found'})"
+          },
+          "503": {
+            "description": "Import unavailable: tables not yet migrated, or the credential key is missing or rotated ({error:'import_unavailable'})"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/import/wordpress/{id}/pause": {
+      "post": {
+        "tags": [
+          "Import"
+        ],
+        "summary": "Pause a WordPress import (admin)",
+        "description": "Pauses a running import, remembering its stage. Pausing a paused import is a no-op.",
+        "responses": {
+          "200": {
+            "description": "The paused job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "source_url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "pulling",
+                            "applying",
+                            "media",
+                            "links",
+                            "paused",
+                            "done",
+                            "cancelled"
+                          ]
+                        },
+                        "counts": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "description": "Per-kind imported/skipped/failed counts"
+                        },
+                        "last_error": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "The last failure, redacted of the Application Password"
+                        },
+                        "report": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "additionalProperties": true,
+                          "description": "Set when the import is done"
+                        },
+                        "created_at": {
+                          "type": "integer"
+                        },
+                        "updated_at": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "busy (a step is running; retry) or not_running (done or cancelled)"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Not an admin"
+          },
+          "404": {
+            "description": "Unknown import ({error:'not_found'})"
+          },
+          "503": {
+            "description": "Import unavailable: tables not yet migrated, or the credential key is missing or rotated ({error:'import_unavailable'})"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/import/wordpress/{id}/resume": {
+      "post": {
+        "tags": [
+          "Import"
+        ],
+        "summary": "Resume a WordPress import (admin)",
+        "description": "Returns a paused import to the stage it paused in, with the failure count and last error cleared.",
+        "responses": {
+          "200": {
+            "description": "The resumed job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "source_url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "pulling",
+                            "applying",
+                            "media",
+                            "links",
+                            "paused",
+                            "done",
+                            "cancelled"
+                          ]
+                        },
+                        "counts": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "description": "Per-kind imported/skipped/failed counts"
+                        },
+                        "last_error": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "The last failure, redacted of the Application Password"
+                        },
+                        "report": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "additionalProperties": true,
+                          "description": "Set when the import is done"
+                        },
+                        "created_at": {
+                          "type": "integer"
+                        },
+                        "updated_at": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "busy, or not_paused (done or cancelled)"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Not an admin"
+          },
+          "404": {
+            "description": "Unknown import ({error:'not_found'})"
+          },
+          "503": {
+            "description": "Import unavailable: tables not yet migrated, or the credential key is missing or rotated ({error:'import_unavailable'})"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/import/wordpress/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Import"
+        ],
+        "summary": "Cancel a WordPress import (admin)",
+        "description": "Stops the import and deletes its stored Application Password. Content already imported stays. A done or cancelled import is left unchanged.",
+        "responses": {
+          "200": {
+            "description": "The cancelled job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "source_url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "pulling",
+                            "applying",
+                            "media",
+                            "links",
+                            "paused",
+                            "done",
+                            "cancelled"
+                          ]
+                        },
+                        "counts": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "description": "Per-kind imported/skipped/failed counts"
+                        },
+                        "last_error": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "The last failure, redacted of the Application Password"
+                        },
+                        "report": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "additionalProperties": true,
+                          "description": "Set when the import is done"
+                        },
+                        "created_at": {
+                          "type": "integer"
+                        },
+                        "updated_at": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "busy (a step is running; retry)"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Not an admin"
+          },
+          "404": {
+            "description": "Unknown import ({error:'not_found'})"
+          },
+          "503": {
+            "description": "Import unavailable: tables not yet migrated, or the credential key is missing or rotated ({error:'import_unavailable'})"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
       }
     }
   }
