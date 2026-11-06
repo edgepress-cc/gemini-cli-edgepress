@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgePress Tenant API",
-    "version": "1.70.0",
+    "version": "1.71.0",
     "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`. Every token-authenticated response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` (epoch seconds); a 429 adds `Retry-After`."
   },
   "servers": [
@@ -98,6 +98,10 @@
             ],
             "default": "inherit",
             "description": "Comments on this post: `inherit` follows Settings → Comments, `open`/`closed` override the auto-close rule. Ignored while the site's `comments_enabled` is false. A WordPress import copies the source post's open/closed."
+          },
+          "perma_link": {
+            "type": ["string", "null"],
+            "description": "Custom URL. A write (`/api/posts`, `/api/pages`) accepts only a slug (letters, digits, `_`, `-`), a site-relative path (not `//` or `/\\`) or an http(s) URL, and answers 400 `{error:'invalid_perma_link'}` otherwise."
           }
         }
       },
@@ -7629,7 +7633,7 @@
             }
           }
         },
-        "description": "Templates, Zones and Block instances are managed here — this endpoint is the write API for page structure. REST covers content (posts, pages, media, settings); the template tree is GraphQL.\n\nAuth is identical to the REST endpoints: `Authorization: Bearer epat_...`. A read-only token gets 403 on any mutation, and every mutation additionally requires the `editor` role or higher — an `author`/`columnist`/`contributor` caller gets a `FORBIDDEN` GraphQL error (`editor role required`). Queries are unaffected. Reachable at both `/api/graphql` and `/api/v1/graphql` (same handler). GraphQL always answers 200 — check the `errors` array, not the status code.\n\n**Queries**\n- `templates(type: TemplateType, isBaseLayout: Boolean, limit: Int, offset: Int)`\n- `template(id: ID, slug: String)` — includes `zones { blocks }`, `blocks`, `inheritedBlocks`\n- `blockTypes(category: BlockCategory, isActive: Boolean)` / `blockType(type: String!)` — same catalogue as `GET /api/blocks` and `GET /api/blocks/{type}/schema`\n- `themeTokens` — same payload as `GET /api/theme/tokens`\n- Content reads, usable WITHOUT a token (the middleware allow-lists non-mutation documents naming them): `page`, `pages`, `post`, `posts`, `category`, `categories`, `tag`, `tags`, `search`, `searchSuggestions`, and the render previews `renderedHome`, `renderedPage`, `renderedPost`, `renderedPostArchive`, `renderedCategory`, `renderedTag` — the last group returns a template's blocks as the site would render them, which is how an agent checks its work without publishing a page\n\n**Template mutations**\n- `createTemplate(input: CreateTemplateInput!)` — `name`, `slug`, `type` (`PAGE|POST|ARCHIVE|HOME|ERROR|CUSTOM`), optional `description`, `isDefault`, `isBaseLayout`, `parentTemplateId`, `thumbnail`, `config`\n- `updateTemplate(id, input: UpdateTemplateInput!)` — same fields, all optional, plus `status`\n- `deleteTemplate(id)` → Boolean\n- `publishTemplate(id)` / `revertTemplate(id)` — draft ⇄ published\n- `setDefaultTemplate(id)` — makes it the default for its type\n- `copyTemplate(id, input: { name, parentTemplateId })`\n- `assignTemplateToPage(pageId, templateId)` / `assignTemplateToPost(postId, templateId)`\n\n**Zone mutations**\n- `createZone(input: { templateId!, name!, slug!, description, maxBlocks, orderIndex, config })`\n- `updateZone(id, input: UpdateZoneInput!)`\n- `deleteZone(id)` → Boolean\n- `reorderZones(templateId, zoneIds: [ID!]!)` — array order becomes `orderIndex` 0..n\n\n**Block-instance mutations**\n- `createBlockInstance(input: { templateId, pageId, postId, zoneSlug!, blockType!, orderIndex, config!, visibility, isActive })` — the config is validated against that block's `GET /api/blocks/{type}/schema` — all 20 block types have one — and a violation is rejected with `extensions.code = \"invalid_config\"` plus a `validationErrors` array. Schema defaults are applied at render time, so the stored config is exactly what you sent\n- `updateBlockInstance(id, input: UpdateBlockInstanceInput!)` — `config` REPLACES the stored object rather than merging into it, and is validated as a whole (so it must still carry the schema's `required` fields). Read the block, merge, send it back\n- `deleteBlockInstance(id)` → Boolean\n- `reorderBlockInstances(zoneSlug, blockIds: [ID!]!)` — reorders by id; note the returned list is every block sharing that zone slug, not only the current template's\n\n**Typical agent flow:** `blockTypes` → `createTemplate` → `createZone` (per region) → `createBlockInstance` (per block, config from the block schema) → `reorderBlockInstances` → `publishTemplate` → `assignTemplateToPage`."
+        "description": "Templates, Zones and Block instances are managed here — this endpoint is the write API for page structure. REST covers content (posts, pages, media, settings); the template tree is GraphQL.\n\nAuth is identical to the REST endpoints: `Authorization: Bearer epat_...`. Without a token, only a query whose every top-level field is a public read (`rendered*`, `post`, `posts`, `page`, `pages`, `category`, `categories`, `tag`, `tags`, `search`, `searchSuggestions`) runs; anything else answers 401. A read-only token gets 403 on any mutation, and every mutation additionally requires the `editor` role or higher — an `author`/`columnist`/`contributor` caller gets a `FORBIDDEN` GraphQL error (`editor role required`). Queries are unaffected. Reachable at both `/api/graphql` and `/api/v1/graphql` (same handler). GraphQL always answers 200 — check the `errors` array, not the status code.\n\n**Queries**\n- `templates(type: TemplateType, isBaseLayout: Boolean, limit: Int, offset: Int)`\n- `template(id: ID, slug: String)` — includes `zones { blocks }`, `blocks`, `inheritedBlocks`\n- `blockTypes(category: BlockCategory, isActive: Boolean)` / `blockType(type: String!)` — same catalogue as `GET /api/blocks` and `GET /api/blocks/{type}/schema`\n- `themeTokens` — same payload as `GET /api/theme/tokens`\n- Content reads, usable WITHOUT a token (the middleware allow-lists non-mutation documents naming them): `page`, `pages`, `post`, `posts`, `category`, `categories`, `tag`, `tags`, `search`, `searchSuggestions`, and the render previews `renderedHome`, `renderedPage`, `renderedPost`, `renderedPostArchive`, `renderedCategory`, `renderedTag` — the last group returns a template's blocks as the site would render them, which is how an agent checks its work without publishing a page\n\n**Template mutations**\n- `createTemplate(input: CreateTemplateInput!)` — `name`, `slug`, `type` (`PAGE|POST|ARCHIVE|HOME|ERROR|CUSTOM`), optional `description`, `isDefault`, `isBaseLayout`, `parentTemplateId`, `thumbnail`, `config`\n- `updateTemplate(id, input: UpdateTemplateInput!)` — same fields, all optional, plus `status`\n- `deleteTemplate(id)` → Boolean\n- `publishTemplate(id)` / `revertTemplate(id)` — draft ⇄ published\n- `setDefaultTemplate(id)` — makes it the default for its type\n- `copyTemplate(id, input: { name, parentTemplateId })`\n- `assignTemplateToPage(pageId, templateId)` / `assignTemplateToPost(postId, templateId)`\n\n**Zone mutations**\n- `createZone(input: { templateId!, name!, slug!, description, maxBlocks, orderIndex, config })`\n- `updateZone(id, input: UpdateZoneInput!)`\n- `deleteZone(id)` → Boolean\n- `reorderZones(templateId, zoneIds: [ID!]!)` — array order becomes `orderIndex` 0..n\n\n**Block-instance mutations**\n- `createBlockInstance(input: { templateId, pageId, postId, zoneSlug!, blockType!, orderIndex, config!, visibility, isActive })` — the config is validated against that block's `GET /api/blocks/{type}/schema` — all 20 block types have one — and a violation is rejected with `extensions.code = \"invalid_config\"` plus a `validationErrors` array. Schema defaults are applied at render time, so the stored config is exactly what you sent\n- `updateBlockInstance(id, input: UpdateBlockInstanceInput!)` — `config` REPLACES the stored object rather than merging into it, and is validated as a whole (so it must still carry the schema's `required` fields). Read the block, merge, send it back\n- `deleteBlockInstance(id)` → Boolean\n- `reorderBlockInstances(zoneSlug, blockIds: [ID!]!)` — reorders by id; note the returned list is every block sharing that zone slug, not only the current template's\n\n**Typical agent flow:** `blockTypes` → `createTemplate` → `createZone` (per region) → `createBlockInstance` (per block, config from the block schema) → `reorderBlockInstances` → `publishTemplate` → `assignTemplateToPage`."
       }
     },
     "/api/invite-codes": {
@@ -8706,7 +8710,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Requires role editor or admin; any other role gets 403."
       },
       "put": {
         "tags": [
@@ -8752,7 +8757,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Requires role editor or admin; any other role gets 403."
       },
       "delete": {
         "tags": [
@@ -8789,7 +8795,8 @@
           "429": {
             "$ref": "#/components/responses/RateLimited"
           }
-        }
+        },
+        "description": "Requires role editor or admin; any other role gets 403."
       }
     },
     "/api/pages": {
@@ -8874,7 +8881,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Requires role editor or admin; any other role gets 403."
       }
     },
     "/api/pages/categories": {
@@ -17165,7 +17173,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Requires role editor or admin; any other role gets 403."
       },
       "put": {
         "tags": [
@@ -17211,7 +17220,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Requires role editor or admin; any other role gets 403."
       },
       "delete": {
         "tags": [
@@ -17248,7 +17258,8 @@
           "429": {
             "$ref": "#/components/responses/RateLimited"
           }
-        }
+        },
+        "description": "Requires role editor or admin; any other role gets 403."
       }
     },
     "/api/templates": {
