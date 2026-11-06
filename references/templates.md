@@ -91,11 +91,38 @@ New keys on existing types:
 
 - `container` (Group): `tag`, `layout` flow / flex-row / flex-column / grid, `justify`, `align`, `wrap`, `columns`, `gap`.
 - `columns`: per-column `width` (% or fr) and `verticalAlign`; row `verticalAlign`; `reverseOnMobile`.
-- `hero`: `blocks` replaces title, subtitle and buttons in the output, but the schema still requires `title` (`required: ["title"]`, `minLength 1`) — pass a short one; `backgroundType: "video"` with `backgroundVideo {url, poster}`; `backgroundImage.focalPoint` and visibility are honoured.
+- `hero`: `blocks` replaces title, subtitle and buttons in the output, but the schema still requires `title` (`required: ["title"]`, `minLength 1`) — pass a short one; `backgroundType: "video"` with `backgroundVideo {url, poster}`; `backgroundImage.focalPoint` and visibility are honoured. Axes: `contentAlignment` (left/center/right) aligns the text and buttons horizontally, `contentPosition` (top/center/bottom) places the content vertically, `contentSide` moves the content box sideways, and `textAlign` overrides `contentAlignment`. (Before CMS migration 0044 `contentAlignment` also set the vertical position; stored heroes were rewritten to keep their look, and a template-bundle exported as `edgepress.version` 1 is read the same way.)
 - `gallery`: `crop`; `link` none / media / lightbox.
+- `photo-slider` (new block): `slides` (≤30; each `image` (ImageRef: `mediaId` + `url`), `caption` ≤300, `link`, `newTab`), `perView` 1-4, `autoplay` 0 or 3-15 seconds, `aspect` original / 16:9 / 4:3 / 1:1, `showCaptions`, `design`. On a store, slide `image` is `{url, altText}` instead.
+- `message-ticker` (store only, new block; shown as "Ticker" — not the CMS `ticker` date/weather bar): `items` (≤20; each `text` ≤120, optional `href`), `separator` (≤8, default `·`), `speed` slow / normal / fast, `variant` brand / subtle / custom (custom needs `background` and `color` as `#rrggbb`), `pause_on_hover` (default true), `custom_css`. Scrolls in one line with a Pause/Play button; still under reduced motion. Put it in the store's Site layout template to show it on every page. No messages renders nothing.
 - `video`: `poster`, `loop`, `muted`, `controls`, `playsinline`; `aspectRatio` 21:9.
 
 Site setting `wp_presets` — `{"colors":{slug:"#rrggbb"},"fontSizes":{slug:"<css length or clamp/min/max>"}}` — drives the WordPress `has-*` classes in imported post bodies; invalid entries are dropped.
+
+## The site menu
+
+There is no separate menu API: the header menu is the `menuItems` config of
+the `navigation` block in the **base layout** template's `header` zone, so it
+is edited like any other block.
+
+```bash
+BASE=$(ep --raw GET '/templates?isBaseLayout=true' | jq -r '.templates[0].id')
+ep --raw GET "/templates/$BASE/blocks?zone=header" | jq '.blocks[] | select(.blockType=="navigation") | {id, menuItems: .config.menuItems}'
+ep PATCH /blocks/<blockId> '{"config":{"menuItems":[
+  {"text":"Home","url":"/"},
+  {"text":"Shop","url":"/page/shop","children":[{"text":"Soap","url":"/category/soap"}]}
+]}}'
+```
+
+An item is `{text, url, openInNewTab?, children?}` (one level of children;
+`url` is `/…`, `http(s):`, `#…`, `mailto:` or `tel:`). PATCH merges at the top
+level, so `menuItems` is replaced whole: send the complete list. A link to a
+page you delete is not removed for you — fix the menu when you delete pages.
+
+The bar also lists the site's categories after your items while
+`showCategories` is true (the default) — and with no `menuItems` at all, those
+categories ARE the whole menu. For a menu of only your items, send
+`"showCategories": false` in the same PATCH.
 
 ## GraphQL — full power and what REST omits
 

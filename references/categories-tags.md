@@ -53,8 +53,14 @@ ep DELETE /posts/categories '{"id":9}'
 ## Gotchas
 
 - **PUT/DELETE are collection-level.** There is no `/posts/categories/{id}`
-  for writes — the target `id` goes in the request body. `{slug}` paths are
-  read-only listings of tagged/categorized content.
+  for writes. PUT takes the target `id` in the request body; **DELETE takes it
+  in the query string** — `DELETE /posts/categories?id=5` (an id in a DELETE
+  body is ignored: 400 "Category ID is required"). Category DELETE also takes
+  `&target=<id>`, where its posts move (default 1, Uncategorized). `{slug}`
+  paths are read-only listings of tagged/categorized content.
+- **A name without a `slug` gets one derived from it, in its own script** —
+  "סבון טבעי" → `סבון-טבעי`, "Мыло ручное" → `мыло-ручное`, "مدونة" → `مدونة`.
+  (Until 2026-10-30 such names got an empty slug.)
 - **Post and page taxonomies never share rows.** Creating "News" under
   `/posts/categories` does not create it for pages. If the user wants the
   same label on both, create it twice — once per taxonomy.

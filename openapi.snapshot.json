@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgePress Tenant API",
-    "version": "1.55.0",
-    "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`."
+    "version": "1.70.0",
+    "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`. Every token-authenticated response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` (epoch seconds); a 429 adds `Retry-After`."
   },
   "servers": [
     {
@@ -88,6 +88,16 @@
           },
           "updated_at": {
             "type": "integer"
+          },
+          "comment_status": {
+            "type": "string",
+            "enum": [
+              "inherit",
+              "open",
+              "closed"
+            ],
+            "default": "inherit",
+            "description": "Comments on this post: `inherit` follows Settings → Comments, `open`/`closed` override the auto-close rule. Ignored while the site's `comments_enabled` is false. A WordPress import copies the source post's open/closed."
           }
         }
       },
@@ -2880,23 +2890,36 @@
             }
           },
           "blocks": {
-            "type": "object",
-            "properties": {
-              "draft": {
+            "description": "Store product: the template's draft blocks — either a bare array, or the shape GET returns, { draft: [...], published: [...] } (published is read-only and ignored). Each block is { id?, block_type, zone_slug, order_index, config, status? }; the server columns GET adds (template_id, is_active, block_type_id, created_at, updated_at) are ignored, and config may be the JSON text GET returns. Any other blocks value is a 400 `invalid_blocks`. PATCH writes drafts; POST …/publish makes them live.",
+            "oneOf": [
+              {
                 "type": "array",
-                "description": "Draft blocks. Each { id?, block_type, zone_slug, order_index, config, status? }",
                 "items": {
                   "type": "object"
                 }
               },
-              "published": {
-                "type": "array",
-                "description": "Published blocks (read-only in response, ignored in PATCH)",
-                "items": {
-                  "type": "object"
+              {
+                "type": "object",
+                "required": [
+                  "draft"
+                ],
+                "properties": {
+                  "draft": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "published": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "Read-only; ignored in PATCH"
+                  }
                 }
               }
-            }
+            ]
           }
         }
       },
@@ -4856,6 +4879,40 @@
           }
         }
       },
+      "StaffInvite": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "manager",
+              "orders",
+              "content"
+            ]
+          },
+          "expires_at": {
+            "type": "integer",
+            "description": "Epoch seconds."
+          },
+          "created_at": {
+            "type": "integer"
+          }
+        }
+      },
+      "StaffSettings": {
+        "type": "object",
+        "properties": {
+          "require_2fa": {
+            "type": "boolean"
+          }
+        }
+      },
       "InsufficientRoleError": {
         "allOf": [
           {
@@ -4871,7 +4928,11 @@
               },
               "required": {
                 "type": "string",
-                "description": "The role the route requires, e.g. \"admin\"."
+                "description": "CMS tenants: the role the route requires, e.g. \"admin\"."
+              },
+              "area": {
+                "type": "string",
+                "description": "Store tenants: the access area the route belongs to (orders, money, customers, customer_export, catalog, sales_setup, content, submissions, dashboard_summary, dashboard_layout, store_setup, staff, self) that the caller's role cannot use for this method. A store answers with `area` and no `required`."
               }
             }
           }
@@ -4908,7 +4969,12 @@
                 ]
               },
               "version": {
-                "type": "integer"
+                "type": "integer",
+                "enum": [
+                  1,
+                  2
+                ],
+                "description": "Bundle format version. Exports write 2. Version 1 (exported before the hero axis fix, CMS migration 0044) is still imported: its heroes take contentPosition from contentAlignment the way stored heroes were rewritten, so they import looking as they did."
               }
             }
           },
@@ -5558,6 +5624,234 @@
             "description": "Last WordPress preflight report (P2c)."
           }
         }
+      },
+      "StoreMedia": {
+        "type": "object",
+        "description": "One file in the store's media library, served from the shop's own domain at `url`.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "object_key": {
+            "type": "string",
+            "description": "uploads/library/<uuid>/<name> - the path under /media/."
+          },
+          "filename": {
+            "type": "string",
+            "description": "The name it was uploaded with."
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "description": "Bytes."
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Recorded for images; null otherwise."
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "alt_text": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "Comment": {
+        "type": "object",
+        "description": "A comment on a post (CMS tenants). `author_email` is present only for editors and admins; the stored ip_hash is never returned.",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "post_id": {
+            "type": "integer"
+          },
+          "post_title": {
+            "type": "string"
+          },
+          "post_slug": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The comment this one replies to; null for a top-level comment (also when its parent was deleted)."
+          },
+          "author_name": {
+            "type": "string"
+          },
+          "author_email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Editor and admin only. Null for comments imported without an Application Password."
+          },
+          "author_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "description": "Sanitised HTML (p, br, strong, em, lists, h2-h4, blockquote, links; no images). Every link carries rel=\"nofollow ugc noopener\"."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "spam",
+              "trash"
+            ]
+          },
+          "user_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The site user who wrote it (an admin reply), else null."
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix seconds"
+          },
+          "approved_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix seconds of the first approval"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "'wordpress' for an imported comment, else null"
+          }
+        }
+      },
+      "MaintenanceState": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "message",
+          "code_set"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "code_set": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AgeGateState": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "min_age": {
+            "type": "integer",
+            "minimum": 13,
+            "maximum": 25
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "site",
+              "selected"
+            ]
+          },
+          "page_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "category_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "remember_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 365
+          },
+          "redirect_url": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "heading": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "enter_label": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "leave_label": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "blog_all": {
+            "type": "boolean",
+            "description": "Store only: gates /blog, its pages and every post. Absent on the CMS."
+          },
+          "post_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Store only: store_posts.id of the gated posts (/blog/<slug>). Absent on the CMS."
+          }
+        }
       }
     },
     "responses": {
@@ -5602,11 +5896,29 @@
             "schema": {
               "type": "integer"
             }
+          },
+          "X-RateLimit-Limit": {
+            "description": "Requests allowed per window (60).",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          "X-RateLimit-Remaining": {
+            "description": "Requests left in the current window.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          "X-RateLimit-Reset": {
+            "description": "When the window resets, epoch seconds.",
+            "schema": {
+              "type": "integer"
+            }
           }
         }
       },
       "Forbidden": {
-        "description": "Authenticated, but not authorized for this route. The route-policy gate in the shared API middleware answers before the handler runs, so the body is one of three codes:\n\n- `insufficient_role` — the caller's role is below the route's minimum; `required` names it. Every /api/v1 route on a store tenant requires `admin`.\n- `read_only_token` — a read-only PAT. Always on a write; and on the SIX reads where the read is itself the privileged act (`/customers/{id}/export`, `/customers/{id}/tax-ids/{tid}`, `/email-credentials`, `/gateway-credentials`, `/suppliers/{supplierId}/credentials`, `/tax/provider-credentials`). Those six GETs accepted a read-only token before spec 1.31.0; a cookie session is unaffected.\n- `session_required` — the route may be read with a PAT but written only from a browser session (`/api-tokens`: a credential may not manage credentials).",
+        "description": "Authenticated, but not authorized for this route. The route-policy gate in the shared API middleware answers before the handler runs, so the body is one of three codes:\n\n- `insufficient_role` — the caller's role is below the route's minimum; on a CMS `required` names it. Store tenants answer `{ \"error\": \"insufficient_role\", \"area\": \"<area>\" }` instead: each operator route belongs to an access area and each of the four store roles (admin, manager, orders, content) may read or write only some areas (see the Store staff and roles section of the skill, and `role` / `areas` on GET /api/v1/users/me). Store staff management (`/api/v1/staff*`) is area `staff`, admin only.\n- `read_only_token` — a read-only PAT. Always on a write; and on the SIX reads where the read is itself the privileged act (`/customers/{id}/export`, `/customers/{id}/tax-ids/{tid}`, `/email-credentials`, `/gateway-credentials`, `/suppliers/{supplierId}/credentials`, `/tax/provider-credentials`). Those six GETs accepted a read-only token before spec 1.31.0; a cookie session is unaffected. `/email-credentials` is refused on BOTH products (on a CMS site by its handler, since 1.70.0); the other five are store routes.\n- `session_required` — the route may be read with a PAT but written only from a browser session (`/api-tokens`: a credential may not manage credentials).",
         "content": {
           "application/json": {
             "schema": {
@@ -7530,6 +7842,7 @@
           "Media"
         ],
         "summary": "POST /api/media/upload",
+        "description": "One request, one file. Requests over 100 MB are refused by Cloudflare, so send anything over 20 MB through POST /api/media/uploads instead. Default size caps per family: image 20 MB, video 20 MB, audio 20 MB, anything else 50 MB (a site may be configured differently; read GET /api/media/limits).",
         "responses": {
           "200": {
             "description": "OK",
@@ -7572,6 +7885,352 @@
                     "type": "string",
                     "format": "binary"
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/uploads": {
+      "post": {
+        "tags": [
+          "Media"
+        ],
+        "summary": "Start a chunked upload (files over 20 MB)",
+        "description": "Starts an R2 multipart upload for one file. Send the parts with PUT /api/media/uploads/{id}/parts/{n} (each `partSize` bytes except the last, which may be smaller), then POST /api/media/uploads/{id}/complete. Default size caps per family: image 20 MB, video 20 MB, audio 20 MB, anything else 50 MB (a site may be configured differently; read GET /api/media/limits). The type is settled as POST /api/media/upload settles it: a declared `type` is kept; a missing one is read from `head` (base64 of the file's first 16 bytes), then the extension. Uploads not completed within 24 h are aborted. With purpose 'wordpress_export' (admin only; an .xml of at most 500 MB) the upload is the WordPress import's export file: stored privately under private/wp-export/ (never served by /media/), no media row; complete answers {export_id, size} for POST /api/import/wordpress.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "size"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "type": {
+                    "type": "string",
+                    "description": "MIME type; empty to settle it from `head`."
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Total bytes."
+                  },
+                  "head": {
+                    "type": "string",
+                    "format": "byte",
+                    "description": "Base64 of the first 16 bytes."
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "enum": [
+                      "wordpress_export"
+                    ],
+                    "description": "P3c: the WordPress import's export file (see above). Any other value is 400."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Upload started.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "partSize": {
+                      "type": "integer",
+                      "description": "Bytes per part (10 MiB)."
+                    },
+                    "parts": {
+                      "type": "integer",
+                      "description": "Number of parts expected."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not JSON, or no name / positive size.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "413": {
+            "description": "Over the cap for the file's type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/uploads/{id}/parts/{n}": {
+      "put": {
+        "tags": [
+          "Media"
+        ],
+        "summary": "Upload one part of a chunked upload",
+        "description": "The raw bytes of part `n` (1-based) as the request body, with Content-Length. Re-sending a part number replaces it, so an interrupted upload resumes by re-sending the parts it has no etag for.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+-[0-9a-f]{16}$"
+            },
+            "description": "The upload id returned by POST /api/media/uploads."
+          },
+          {
+            "name": "n",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "partNumber": {
+                      "type": "integer"
+                    },
+                    "etag": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Part number out of range.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "404": {
+            "description": "No such upload for this user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "411": {
+            "description": "No Content-Length.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Part larger than partSize.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/uploads/{id}/complete": {
+      "post": {
+        "tags": [
+          "Media"
+        ],
+        "summary": "Finish a chunked upload",
+        "description": "Assembles the parts and creates the media row in `staging`, answering like POST /api/media/upload. The assembled file must match the declared size and the type settled at start (re-read from its first bytes); otherwise it is deleted.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+-[0-9a-f]{16}$"
+            },
+            "description": "The upload id returned by POST /api/media/uploads."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "parts"
+                ],
+                "properties": {
+                  "parts": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "partNumber",
+                        "etag"
+                      ],
+                      "properties": {
+                        "partNumber": {
+                          "type": "integer"
+                        },
+                        "etag": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored in staging. For a 'wordpress_export' upload: {export_id, size} instead (415 code not_xml when the file is not XML, which deletes it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Media"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "export_id": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed parts, parts missing, or the size does not match.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "404": {
+            "description": "No such upload for this user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Over the cap for the file's type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The first bytes do not match the type the upload started as (`type_mismatch`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -10718,7 +11377,7 @@
             }
           }
         },
-        "description": "`theme_palette` (JSON object: primary, accent, text, background, muted, surface — each `#rrggbb`) and `theme_fonts` (JSON object: body, heading, mono — a self-hosted family name or `system`) are validated; an invalid value returns 400 `invalid_theme_setting`. An object value for either key is stored as its JSON string."
+        "description": "`theme_palette` (JSON object: primary, accent, text, background, muted, surface — each `#rrggbb`), `theme_fonts` (JSON object: body, heading, mono — a self-hosted family name or `system`) and `color_scheme` (`auto` — the default, also when unset: follow the visitor's device; `light` — never apply dark mode, as set by applying a WordPress design) are validated; an invalid value returns 400 `invalid_theme_setting`. An object value for theme_palette or theme_fonts is stored as its JSON string. Comments settings: `comments_enabled` (`true`/`false`; default false, turned on by a WordPress import that brings comments), `comments_moderation` (`first` — default: a first comment from an email is held, later ones auto-approve; `all` — every comment held; `none`), `comments_close_days` (whole days after publishing that a post's comments close; 0 = never; default 90). `comments_notify` (`true`/`false`, default true): email the site's admins about comments held for approval, at most once every 15 minutes. Any other value is a 400 `invalid_comment_setting`."
       },
       "put": {
         "tags": [
@@ -10765,7 +11424,7 @@
             }
           }
         },
-        "description": "`theme_palette` (JSON object: primary, accent, text, background, muted, surface — each `#rrggbb`) and `theme_fonts` (JSON object: body, heading, mono — a self-hosted family name or `system`) are validated; an invalid value returns 400 `invalid_theme_setting`. An object value for either key is stored as its JSON string."
+        "description": "`theme_palette` (JSON object: primary, accent, text, background, muted, surface — each `#rrggbb`), `theme_fonts` (JSON object: body, heading, mono — a self-hosted family name or `system`) and `color_scheme` (`auto` — the default, also when unset: follow the visitor's device; `light` — never apply dark mode, as set by applying a WordPress design) are validated; an invalid value returns 400 `invalid_theme_setting`. An object value for theme_palette or theme_fonts is stored as its JSON string. `front_page_id`: the id of the published page `/` shows, or empty for the home design; any other value is a 400 `invalid_front_page` (a value equal to the stored one is accepted unchanged). Comments settings: `comments_enabled` (`true`/`false`; default false, turned on by a WordPress import that brings comments), `comments_moderation` (`first` — default: a first comment from an email is held, later ones auto-approve; `all` — every comment held; `none`), `comments_close_days` (whole days after publishing that a post's comments close; 0 = never; default 90). `comments_notify` (`true`/`false`, default true): email the site's admins about comments held for approval, at most once every 15 minutes. Any other value is a 400 `invalid_comment_setting`."
       },
       "delete": {
         "tags": [
@@ -16087,12 +16746,40 @@
         ],
         "summary": "POST /api/staff-invites",
         "responses": {
-          "200": {
-            "description": "OK",
+          "201": {
+            "description": "Created. The invite is mailed when the site has a Brevo account; the link comes back either way.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "invite_url",
+                    "mailed",
+                    "mail"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "invite_url": {
+                      "type": "string"
+                    },
+                    "mailed": {
+                      "type": "boolean",
+                      "description": "`mail === 'sent'`."
+                    },
+                    "mail": {
+                      "type": "string",
+                      "enum": [
+                        "sent",
+                        "no_account",
+                        "failed",
+                        "rate_limited"
+                      ],
+                      "description": "What became of the invitation email, sent on the site's own Brevo account: `sent`; `no_account` (no account connected, nothing sent); `failed` (Brevo or the link refused it); `rate_limited` (over the hourly mail cap). Anything but `sent`: hand `invite_url` over yourself."
+                    }
+                  }
                 }
               }
             }
@@ -16226,11 +16913,42 @@
         "summary": "POST /api/staff-invites/{id}/resend",
         "responses": {
           "200": {
-            "description": "OK",
+            "description": "OK. A new link (the old one stops working), mailed when the site has a Brevo account.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "invite_url",
+                    "mailed",
+                    "mail"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "invite_url": {
+                      "type": "string"
+                    },
+                    "mailed": {
+                      "type": "boolean",
+                      "description": "`mail === 'sent'`."
+                    },
+                    "mail": {
+                      "type": "string",
+                      "enum": [
+                        "sent",
+                        "no_account",
+                        "failed",
+                        "rate_limited"
+                      ],
+                      "description": "What became of the invitation email, sent on the site's own Brevo account: `sent`; `no_account` (no account connected, nothing sent); `failed` (Brevo or the link refused it); `rate_limited` (over the hourly mail cap). Anything but `sent`: hand `invite_url` over yourself."
+                    }
+                  }
                 }
               }
             }
@@ -25184,10 +25902,11 @@
     "/api/v1/email-credentials": {
       "get": {
         "tags": [
-          "Store"
+          "Store",
+          "Settings"
         ],
         "summary": "GET /api/v1/email-credentials",
-        "description": "Report whether this store has a connected Brevo account: configured, the visible from_address/from_name and both timestamps — never the API key. There is no read-back call for the key by design (write-only, the same rule gateway credentials follow): an owner who has lost it reconnects it from Brevo's own dashboard, through PUT. No master-key gate here — a missing platform encryption binding must never stop an owner from seeing whether their own account is connected. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may GET. READ-ONLY PATs MAY NOT CALL THIS: the read is itself the privileged act, so a read-only token is 403 read_only_token in the middleware (changed in spec 1.31.0 — it was permitted before). A full-access PAT or a cookie session reads it normally.",
+        "description": "Report whether this store has a connected Brevo account: configured, the visible from_address/from_name and both timestamps — never the API key. There is no read-back call for the key by design (write-only, the same rule gateway credentials follow): an owner who has lost it reconnects it from Brevo's own dashboard, through PUT. No master-key gate here — a missing platform encryption binding must never stop an owner from seeing whether their own account is connected. Served by BOTH products, admin only: a store has one account per store; a CMS site has one per site, and it carries staff invites, held-comment notices and member mail (a site without one sends no mail). The CMS answers the same bodies and error codes except store_not_provisioned. READ-ONLY PATs MAY NOT CALL THIS, on either product: the read is itself the privileged act, so a read-only token is 403 read_only_token — from the route-policy middleware on a store (since spec 1.31.0), from the handler on a CMS site (since 1.70.0). A full-access PAT or a cookie session reads it normally.",
         "security": [
           {
             "bearerAuth": []
@@ -25275,10 +25994,11 @@
       },
       "put": {
         "tags": [
-          "Store"
+          "Store",
+          "Settings"
         ],
         "summary": "PUT /api/v1/email-credentials",
-        "description": "Connect (or replace) this store's own Brevo account: exactly api_key, from_address and a nullable from_name — an unknown field is a 400 unknown_field:<name>, never silently ignored. The key is verified against Brevo BEFORE it is stored, on two DISTINCT failures: invalid_api_key (the key itself is rejected — Brevo answers 401/403 on GET /account) and sender_not_verified (the key is fine, but from_address is not one of that account's verified, active senders — the response's message names the address). A transport failure while verifying refuses the save as verification_unavailable (503, safe to retry) rather than storing a key that has never been proven to work. The key is encrypted at rest and NEVER returned by any endpoint — the success body is {\"success\": true, \"configured\": true} and nothing more. Returns 503 email_credentials_unavailable while the platform encryption key is not yet configured (checked AFTER body validation, so a malformed body is still reported as its own 400 first). Slice 5c-c: once connected, this account — never a shared platform address — is what emails_enabled's mail actually sends from; see StoreSettings.emails_enabled. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "description": "Connect (or replace) this store's own Brevo account: exactly api_key, from_address and a nullable from_name — an unknown field is a 400 unknown_field:<name>, never silently ignored. The key is verified against Brevo BEFORE it is stored, on two DISTINCT failures: invalid_api_key (the key itself is rejected — Brevo answers 401/403 on GET /account) and sender_not_verified (the key is fine, but from_address is not one of that account's verified, active senders — the response's message names the address). A transport failure while verifying refuses the save as verification_unavailable (503, safe to retry) rather than storing a key that has never been proven to work. The key is encrypted at rest and NEVER returned by any endpoint — the success body is {\"success\": true, \"configured\": true} and nothing more. Returns 503 email_credentials_unavailable while the platform encryption key is not yet configured (checked AFTER body validation, so a malformed body is still reported as its own 400 first). Slice 5c-c: once connected, this account — never a shared platform address — is what emails_enabled's mail actually sends from; see StoreSettings.emails_enabled. Served by BOTH products, admin only: a store has one account per store; a CMS site has one per site, and it carries staff invites, held-comment notices and member mail (a site without one sends no mail). The CMS answers the same bodies and error codes except store_not_provisioned. Read-only tokens may only GET.",
         "security": [
           {
             "bearerAuth": []
@@ -25403,10 +26123,11 @@
       },
       "delete": {
         "tags": [
-          "Store"
+          "Store",
+          "Settings"
         ],
         "summary": "DELETE /api/v1/email-credentials",
-        "description": "Disconnect this store's Brevo account. No master-key gate here either, following the gateway-credentials precedent: deleting decrypts nothing, so a missing platform secret must never stop a merchant clearing stored credentials. `removed` is false, not an error, when nothing was configured. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "description": "Disconnect this store's Brevo account. No master-key gate here either, following the gateway-credentials precedent: deleting decrypts nothing, so a missing platform secret must never stop a merchant clearing stored credentials. `removed` is false, not an error, when nothing was configured. Served by BOTH products, admin only: a store has one account per store; a CMS site has one per site, and it carries staff invites, held-comment notices and member mail (a site without one sends no mail). The CMS answers the same bodies and error codes except store_not_provisioned. Read-only tokens may only GET.",
         "security": [
           {
             "bearerAuth": []
@@ -26243,6 +26964,390 @@
         }
       }
     },
+    "/api/v1/media": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/media",
+        "description": "The media library, newest first. `limit` 1-200 (default 50); `before` = the previous page's `next_before` (an id) for the next page.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of files.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "media": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StoreMedia"
+                      }
+                    },
+                    "next_before": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "POST /api/v1/media",
+        "description": "Upload one file (multipart field `file`, max 20MB): images, PDF, MP4/WebM video, MP3/WAV/OGG audio. It is stored as uploaded and live at once at `location` on the shop's own domain (`/media/uploads/library/<uuid>/<name>`); images get their width/height recorded, which storefront pages use to size `<img>` tags. Write tokens only.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stored and live at `location`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "location": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "media": {
+                      "$ref": "#/components/schemas/StoreMedia"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not multipart, no `file`, or an empty file."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "description": "Over 20MB (`file_too_large`)."
+          },
+          "415": {
+            "description": "Not an image, PDF, MP4/WebM video or MP3/WAV/OGG audio (`unsupported_type:<type>`)."
+          }
+        }
+      }
+    },
+    "/api/v1/media/upload": {
+      "post": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "POST /api/v1/media/upload",
+        "description": "The same upload as POST /api/v1/media, at the CMS's path, so a client written for the CMS media library works on a store unchanged.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stored and live at `location`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "location": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "media": {
+                      "$ref": "#/components/schemas/StoreMedia"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not multipart, no `file`, or an empty file."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "description": "Over 20MB (`file_too_large`)."
+          },
+          "415": {
+            "description": "Not an image, PDF, MP4/WebM video or MP3/WAV/OGG audio (`unsupported_type:<type>`)."
+          }
+        }
+      }
+    },
+    "/api/v1/media/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/media/{id}",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "media": {
+                      "$ref": "#/components/schemas/StoreMedia"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Media not found."
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PUT /api/v1/media/{id}",
+        "description": "Set `display_name` (1-200 characters) and/or `alt_text` (up to 500). Any other key is a 400 `unknown_field:<name>`. PATCH is the same.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "display_name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "alt_text": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "media": {
+                      "$ref": "#/components/schemas/StoreMedia"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown field, wrong type, empty display_name, or nothing to update."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Media not found."
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "DELETE /api/v1/media/{id}",
+        "description": "Remove the file and its row; its URL stops working (cached copies may linger up to the browser's cache lifetime).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Media not found."
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PATCH /api/v1/media/{id}",
+        "description": "Same as PUT.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "display_name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "alt_text": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "media": {
+                      "$ref": "#/components/schemas/StoreMedia"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown field, wrong type, empty display_name, or nothing to update."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Media not found."
+          }
+        }
+      }
+    },
     "/api/v1/orders": {
       "get": {
         "tags": [
@@ -26720,7 +27825,7 @@
           "Store"
         ],
         "summary": "PATCH /api/v1/orders/{id}",
-        "description": "Move the order through its lifecycle: body is exactly {status} — one of processing, shipped, completed, cancelled, refunded. Legal moves: pending_payment → cancelled; paid → processing | cancelled | refunded; processing → shipped | cancelled | refunded; shipped → completed | refunded (cancel is unavailable once shipped — the goods are gone, refund is the path); completed → refunded; cancelled → refunded; refunded is terminal. An illegal move is a 409 and changes nothing. 'refunded' has one extra gate: an order whose settled charge was taken by an online gateway (payplus) cannot be marked refunded until refund rows the gateway confirmed cover the captured amount — this endpoint never contacts the gateway, so marking such an order refunded by hand would record a refund whose money never moved; it is a 409 pointing at POST /api/v1/orders/{orderId}/refunds, which actually sends the money back (a full refund through it transitions the order automatically). A pending refund reservation does not open the gate — only confirmed ('received') refunds count. Offline charges are unaffected: refunding a bank transfer out-of-band and recording it here is exactly what the move is for. 'paid' is NEVER settable here — recording payment receipt (PATCH /api/v1/orders/{orderId}/payments/{paymentId}) is the only route to paid, and asking for it is a 409. Both cancelled and refunded return each line's quantity to its product's stock, exactly once per order — the ordinary cancelled → refunded sequence does not restock twice, and the order's restocked_at records when stock came back. Only TRACKED products are touched: an untracked product (stock null) stays untracked, nothing is written to it. Refunding restocks even when the goods were not returned: for a tracked product, correct its stock field afterwards if they weren't — never by writing a number onto an untracked product, which would silently turn tracking on. If the order's status changed concurrently between read and write, the call is a 409 and changes nothing — re-read and retry. An unknown body field is a 400 unknown_field:<name>, never silently ignored. Another store's order id, an unknown id or a malformed id is a plain 404. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route. Authenticated with a store PAT; read-only tokens may only GET.",
+        "description": "Move the order through its lifecycle: body is exactly {status} — one of processing, shipped, completed, cancelled, refunded. Legal moves: pending_payment → cancelled; paid → processing | cancelled | refunded; processing → shipped | cancelled | refunded; shipped → completed | refunded (cancel is unavailable once shipped — the goods are gone, refund is the path); completed → refunded; cancelled → refunded; refunded is terminal. An illegal move is a 409 and changes nothing. 'refunded' has one extra gate: an order whose settled charge was taken by an online gateway (payplus) cannot be marked refunded until refund rows the gateway confirmed cover the captured amount — this endpoint never contacts the gateway, so marking such an order refunded by hand would record a refund whose money never moved; it is a 409 pointing at POST /api/v1/orders/{orderId}/refunds, which actually sends the money back (a full refund through it transitions the order automatically). A pending refund reservation does not open the gate — only confirmed ('received') refunds count. Offline charges are unaffected: refunding a bank transfer out-of-band and recording it here is exactly what the move is for. Marking an order refunded counts as a refund, so it also needs the money area: an Orders staff person (who may make every other move) gets 403 {error: 'insufficient_role', area: 'money'}. 'paid' is NEVER settable here — recording payment receipt (PATCH /api/v1/orders/{orderId}/payments/{paymentId}) is the only route to paid, and asking for it is a 409. Both cancelled and refunded return each line's quantity to its product's stock, exactly once per order — the ordinary cancelled → refunded sequence does not restock twice, and the order's restocked_at records when stock came back. Only TRACKED products are touched: an untracked product (stock null) stays untracked, nothing is written to it. Refunding restocks even when the goods were not returned: for a tracked product, correct its stock field afterwards if they weren't — never by writing a number onto an untracked product, which would silently turn tracking on. If the order's status changed concurrently between read and write, the call is a 409 and changes nothing — re-read and retry. An unknown body field is a 400 unknown_field:<name>, never silently ignored. Another store's order id, an unknown id or a malformed id is a plain 404. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route. Authenticated with a store PAT; read-only tokens may only GET.",
         "security": [
           {
             "bearerAuth": []
@@ -28482,6 +29587,11 @@
                       "published"
                     ],
                     "default": "draft"
+                  },
+                  "published_at": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The publish date, unix seconds — for migrations, so an imported post keeps its original date (otherwise the first publish stamps \"now\"). Past dates only (no scheduling): a future value, milliseconds or a string is a 400."
                   }
                 }
               }
@@ -28610,6 +29720,11 @@
                       "draft",
                       "published"
                     ]
+                  },
+                  "published_at": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The publish date, unix seconds — for migrations, so an imported post keeps its original date (otherwise the first publish stamps \"now\"). Past dates only (no scheduling): a future value, milliseconds or a string is a 400."
                   }
                 }
               }
@@ -39039,7 +40154,7 @@
           "Users"
         ],
         "summary": "GET /api/v1/users/me",
-        "description": "Uniform product discovery: BOTH products serve this path. Returns the caller's own user row (never includes credential columns) plus `readOnly` — true when authenticating with a read-only PAT — `authMethod` (`pat` or `session`), and `product` (\"cms\" or \"store\"), which tells you which sections of this API the tenant serves. Make it the first call of every session. On CMS tenants it is the /api/v1 mirror of /api/users/me, so PATCH /api/v1/users/me works there too — documented once at PATCH /api/users/me, like every CMS operation. On store tenants only this /api/v1 path exists, and only as GET: PATCH is a 404 (a read-only token is refused first with 403 read_only_token).",
+        "description": "Uniform product discovery: BOTH products serve this path. Returns the caller's own user row (never includes credential columns) plus `readOnly` — true when authenticating with a read-only PAT — `authMethod` (`pat` or `session`), and `product` (\"cms\" or \"store\"), which tells you which sections of this API the tenant serves. On a store it also returns `role` (admin, manager, orders or content), `areas` (`[{area, write}]` the role may use; only `self` while the session still has to set up a required two-factor) and `local` (a store-only staff account). Make it the first call of every session. On CMS tenants it is the /api/v1 mirror of /api/users/me, so PATCH /api/v1/users/me works there too — documented once at PATCH /api/users/me, like every CMS operation. On store tenants only this /api/v1 path exists, and only as GET: PATCH is a 404 (a read-only token is refused first with 403 read_only_token).",
         "security": [
           {
             "bearerAuth": []
@@ -39071,6 +40186,39 @@
                         "pat",
                         "session"
                       ]
+                    },
+                    "role": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "admin",
+                        "manager",
+                        "orders",
+                        "content",
+                        null
+                      ],
+                      "description": "Store only: the caller's effective store role, read from the user row on this request. Absent on a CMS."
+                    },
+                    "areas": {
+                      "type": "array",
+                      "description": "Store only: the access areas this role may read, each with whether it may also write. Absent on a CMS.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "area": {
+                            "type": "string"
+                          },
+                          "write": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "local": {
+                      "type": "boolean",
+                      "description": "Store only: true for a store-only staff account (signs in with a store password, not EdgePress); false for an EdgePress (SSO) admin."
                     }
                   }
                 }
@@ -40131,6 +41279,19 @@
                           }
                         }
                       ]
+                    },
+                    "brand": {
+                      "type": "object",
+                      "description": "The header brand in the default base navigation block, so the wizard shows a logo set at sign-up. Empty strings when unset.",
+                      "properties": {
+                        "logo": {
+                          "type": "string",
+                          "description": "Empty, or a /media/ path"
+                        },
+                        "logo_text": {
+                          "type": "string"
+                        }
+                      }
                     }
                   }
                 }
@@ -40174,6 +41335,7 @@
                       {
                         "type": "string",
                         "enum": [
+                          "brand",
                           "identity",
                           "design",
                           "look",
@@ -40284,6 +41446,66 @@
         }
       }
     },
+    "/api/onboarding/brand": {
+      "put": {
+        "tags": [
+          "Onboarding"
+        ],
+        "summary": "Set the site logo and logo text (admin)",
+        "description": "The welcome wizard's Brand step. Writes the header logo and logo text into the default base's navigation block and the logo into its footer block. An empty logo clears it so the wordmark shows. Title, tagline and favicon are ordinary settings (PUT /api/settings).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "logo",
+                  "logo_text"
+                ],
+                "properties": {
+                  "logo": {
+                    "type": "string",
+                    "description": "Empty, or a /media/ path from POST /api/media/upload. The upload's absolute location on this site's own origin is accepted too and stored as its path; any other host is a 400."
+                  },
+                  "logo_text": {
+                    "type": "string",
+                    "maxLength": 120
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body (error says which field)"
+          },
+          "403": {
+            "description": "Not an admin"
+          },
+          "409": {
+            "description": "no_header: the default base has no navigation block to hold the logo; nothing was written. A missing footer block is not an error."
+          }
+        }
+      }
+    },
     "/api/onboarding/wp-scan": {
       "post": {
         "tags": [
@@ -40300,8 +41522,8 @@
                 "properties": {
                   "url": {
                     "type": "string",
-                    "format": "uri",
-                    "description": "Defaults to the onboarding row's source_url."
+                    "maxLength": 2000,
+                    "description": "The site address as a person types it: a scheme is optional (example.com is https://example.com), typo'd schemes are repaired, and WordPress paths (wp-admin, wp-login.php, feed, date archives), query and fragment are cut back to the site root; a subdirectory install keeps its path. Defaults to the onboarding row's source_url."
                   },
                   "username": {
                     "type": "string",
@@ -40322,7 +41544,7 @@
             "description": "The report (see Onboarding.scan)"
           },
           "400": {
-            "description": "Missing URL or malformed fields"
+            "description": "Missing URL or malformed fields, or invalid_url: not a public site address (detail says why, e.g. an email address, an IP literal, no domain ending)"
           },
           "403": {
             "description": "Not an admin"
@@ -40342,7 +41564,7 @@
           "Import"
         ],
         "summary": "Start a WordPress import (admin)",
-        "description": "Creates the site's WordPress content import job (posts, pages, categories, tags, content-referenced media, redirects). The URL defaults to the onboarding row's source_url and is re-based to the site's canonical origin (http to https, www/apex twin). An Application Password (https only) is checked against wp/v2/users/me, stored sealed only until the import finishes or is cancelled, then deleted; it is never returned. One active import per site. Limited to 5 creates per site per hour. With scope 'all' the content stages end in a design stage that builds the source site's shell as a stored design (see GET /api/import/wordpress/design); a design failure never undoes content. After the shell, the design stage converts the front page into a home template and landing pages (mostly layout blocks, at most 20) into one template each; prose, classic-editor and page-builder pages keep their imported HTML, and a page's content is never changed.",
+        "description": "Creates the site's WordPress content import job (posts, pages, categories, tags, content-referenced media, redirects). The URL defaults to the onboarding row's source_url and is re-based to the site's canonical origin (http to https, www/apex twin). An Application Password (https only) is checked against wp/v2/users/me, stored sealed only until the import finishes or is cancelled, then deleted; it is never returned. One active import per site. Limited to 5 creates per site per hour. With scope 'all' the content stages end in a design stage that builds the source site's shell as a stored design (see GET /api/import/wordpress/design); a design failure never undoes content. After the shell, the design stage converts the front page into a home template and landing pages (mostly layout blocks, at most 20) into one template each; prose, classic-editor and page-builder pages keep their imported HTML, and a page's content is never changed. An export-file import (P3c) sends {export_id} instead of url/username/app_password: the id POST /api/media/uploads (purpose 'wordpress_export') answered for the site's WordPress export (.xml, WXR). The site address is read from the export; the pull reads the file in byte ranges and stages the same rows as the REST pull (posts, pages, drafts, categories, tags, authors as bylines, approved comments, custom post types, attachments as media). Files are downloaded from the old site only when its address answers (or sent from the owner's uploads folder through POST /api/import/wordpress/{id}/media); the design stage runs only when it answers, otherwise the report's design is {ready:false, notes:['design_offline']}. The export is deleted once read, and on cancel.",
         "responses": {
           "201": {
             "description": "The new job",
@@ -40365,7 +41587,315 @@
                           "type": "string",
                           "enum": [
                             "pulling",
+                            "showcase",
                             "applying",
+                            "builder",
+                            "media",
+                            "links",
+                            "design",
+                            "paused",
+                            "done",
+                            "cancelled"
+                          ]
+                        },
+                        "counts": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "description": "Per-kind imported/skipped/failed counts"
+                        },
+                        "last_error": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "The last failure, redacted of the Application Password"
+                        },
+                        "report": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "additionalProperties": true,
+                          "description": "Set when the import is done",
+                          "properties": {
+                            "design": {
+                              "type": "object",
+                              "description": "The design stage's outcome (P4a)",
+                              "properties": {
+                                "ready": {
+                                  "type": "boolean"
+                                },
+                                "source": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ],
+                                  "enum": [
+                                    "api",
+                                    "html",
+                                    null
+                                  ]
+                                },
+                                "notes": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "description": "What did not carry over, e.g. menu_missing, logo_missing, font_swapped:…, design_failed:…, pages_failed:…; design_offline (an export import whose site did not answer: no design, choose a starter design)"
+                                },
+                                "pages": {
+                                  "type": "object",
+                                  "description": "The design stage's pages phase (P4b): which pages were converted to native blocks and which keep their imported HTML.",
+                                  "properties": {
+                                    "converted": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "page_id": {
+                                            "type": [
+                                              "integer",
+                                              "null"
+                                            ],
+                                            "description": "This site's page; null for a home built from 'Latest posts' or from a page that was not imported"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "kept_as_text": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "title": {
+                                            "type": "string"
+                                          },
+                                          "reason": {
+                                            "type": "string",
+                                            "enum": [
+                                              "prose",
+                                              "classic",
+                                              "builder",
+                                              "failed"
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "notes": {
+                                      "type": "object",
+                                      "additionalProperties": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "description": "By page title: page_failed:…, page_too_large:…, page_edited:…, page_truncated:…, image_not_copied, effect_dropped:…, placeholder:…, html_kept:…"
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "comments": {
+                              "type": "integer",
+                              "description": "Approved comments imported onto imported posts (re-imports add none)"
+                            },
+                            "pingbacks_skipped": {
+                              "type": "integer",
+                              "description": "Pingbacks/trackbacks the source returned, not imported (WordPress's REST normally returns none)"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "site",
+                                "export"
+                              ]
+                            },
+                            "media": {
+                              "type": "object",
+                              "properties": {
+                                "copied": {
+                                  "type": "integer",
+                                  "description": "Files now on this site (downloaded + from_zip)"
+                                },
+                                "downloaded": {
+                                  "type": "integer",
+                                  "description": "Copied from the old site"
+                                },
+                                "from_zip": {
+                                  "type": "integer",
+                                  "description": "Sent from the owner's uploads folder (P3c)"
+                                },
+                                "too_large": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "description": "Old URLs of files over the size cap (the 50 MB download cap, or the site's upload limit for a file in the uploads folder)"
+                                },
+                                "failed": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "url": {
+                                        "type": "string"
+                                      },
+                                      "error": {
+                                        "type": "string",
+                                        "description": "e.g. http_404, network_error, site_unreachable"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "warnings": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "description": "e.g. no_content_access, password_rejected, no_drafts:post, builder_posts_cleaned:N, dropped_tags:N:…, wxr_truncated (the export ended mid-item), wxr_items_too_large:N (items over 16 MB skipped)"
+                            }
+                          }
+                        },
+                        "created_at": {
+                          "type": "integer"
+                        },
+                        "updated_at": {
+                          "type": "integer"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "site",
+                            "export"
+                          ],
+                          "description": "What the content is read from: the site's REST API, or an uploaded export file (P3c)"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed fields (including a pages_mode other than with_design, now or per_page), invalid_url (not a public site address; detail says why), https_required, or login_failed (WordPress rejected the username/Application Password)"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Not an admin"
+          },
+          "409": {
+            "description": "An import is already active ({error:'import_active', job_id}). Checked first: it makes no outbound call and does not count against the rate limit, so a client may use it to find the running import"
+          },
+          "422": {
+            "description": "source_unreachable, source_moved (the site lives at another host; detail says where) or rest_unavailable; or the export_id file is not a WordPress export ({error:'not_a_wordpress_export'}, the file is deleted)"
+          },
+          "429": {
+            "description": "More than 5 creates this hour"
+          },
+          "503": {
+            "description": "Import unavailable: tables not yet migrated, or the credential key is missing or rotated ({error:'import_unavailable'})"
+          },
+          "404": {
+            "description": "export_id names no stored export ({error:'export_not_found'})"
+          },
+          "413": {
+            "description": "The export is over 500 MB ({error:'export_too_large'})"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "The site address as a person types it: a scheme is optional (example.com is https://example.com), typo'd schemes are repaired, and WordPress paths (wp-admin, wp-login.php, feed, date archives), query and fragment are cut back to the site root; a subdirectory install keeps its path. Defaults to the onboarding row's source_url."
+                  },
+                  "username": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "app_password": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "writeOnly": true
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "all",
+                      "design"
+                    ],
+                    "default": "all",
+                    "description": "'design' imports only the site's design (palette, fonts, logo, menu, header and footer): the job starts in state design and no content is pulled."
+                  },
+                  "pages_mode": {
+                    "type": "string",
+                    "enum": [
+                      "with_design",
+                      "now",
+                      "per_page"
+                    ],
+                    "default": "with_design",
+                    "description": "When converted landing pages go live (P4b). with_design: when the imported design is applied; now: when the import finishes (each page is linked to its converted layout, unless edited since); per_page: the layouts are created and each page's editor switches to them. The home page always waits for the design to be applied. Any other value is 400."
+                  },
+                  "export_id": {
+                    "type": "string",
+                    "pattern": "^\\d{1,16}-[0-9a-f]{16}$",
+                    "description": "P3c: the uploaded WordPress export to import from (the export_id of POST /api/media/uploads/{id}/complete). Not combined with url, username, app_password or scope."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Import"
+        ],
+        "summary": "GET /api/import/wordpress",
+        "description": "The site's unfinished import (not done or cancelled), whoever started it, or `{\"job\": null}`. Admin only. Use it to find and finish an import started in another browser or over the API.",
+        "responses": {
+          "200": {
+            "description": "The job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "job": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "source_url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "pulling",
+                            "showcase",
+                            "applying",
+                            "builder",
                             "media",
                             "links",
                             "design",
@@ -40474,6 +42004,14 @@
                                   }
                                 }
                               }
+                            },
+                            "comments": {
+                              "type": "integer",
+                              "description": "Approved comments imported onto imported posts (re-imports add none)"
+                            },
+                            "pingbacks_skipped": {
+                              "type": "integer",
+                              "description": "Pingbacks/trackbacks the source returned, not imported (WordPress's REST normally returns none)"
                             }
                           }
                         },
@@ -40482,6 +42020,17 @@
                         },
                         "updated_at": {
                           "type": "integer"
+                        },
+                        "next_step": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "While the job is in a running stage, the call that advances it (`POST /api/import/wordpress/{id}/step`). Nothing else advances it; null once paused, done or cancelled."
+                        },
+                        "stalled": {
+                          "type": "boolean",
+                          "description": "True when the job is in a running stage but no step has run for two minutes: whatever was driving it stopped."
                         }
                       }
                     }
@@ -40490,71 +42039,14 @@
               }
             }
           },
-          "400": {
-            "description": "Malformed fields (including a pages_mode other than with_design, now or per_page), invalid_url, https_required, or login_failed (WordPress rejected the username/Application Password)"
-          },
           "401": {
             "description": "Not signed in"
           },
           "403": {
             "description": "Not an admin"
           },
-          "409": {
-            "description": "An import is already active ({error:'import_active', job_id}). Checked first: it makes no outbound call and does not count against the rate limit, so a client may use it to find the running import"
-          },
-          "422": {
-            "description": "source_unreachable, source_moved (the site lives at another host; detail says where) or rest_unavailable"
-          },
-          "429": {
-            "description": "More than 5 creates this hour"
-          },
           "503": {
             "description": "Import unavailable: tables not yet migrated, or the credential key is missing or rotated ({error:'import_unavailable'})"
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "url": {
-                    "type": "string",
-                    "format": "uri",
-                    "description": "Defaults to the onboarding row's source_url."
-                  },
-                  "username": {
-                    "type": "string",
-                    "maxLength": 200
-                  },
-                  "app_password": {
-                    "type": "string",
-                    "maxLength": 200,
-                    "writeOnly": true
-                  },
-                  "scope": {
-                    "type": "string",
-                    "enum": [
-                      "all",
-                      "design"
-                    ],
-                    "default": "all",
-                    "description": "'design' imports only the site's design (palette, fonts, logo, menu, header and footer): the job starts in state design and no content is pulled."
-                  },
-                  "pages_mode": {
-                    "type": "string",
-                    "enum": [
-                      "with_design",
-                      "now",
-                      "per_page"
-                    ],
-                    "default": "with_design",
-                    "description": "When converted landing pages go live (P4b). with_design: when the imported design is applied; now: when the import finishes (each page is linked to its converted layout, unless edited since); per_page: the layouts are created and each page's editor switches to them. The home page always waits for the design to be applied. Any other value is 400."
-                  }
-                }
-              }
-            }
           }
         }
       }
@@ -40588,7 +42080,9 @@
                           "type": "string",
                           "enum": [
                             "pulling",
+                            "showcase",
                             "applying",
+                            "builder",
                             "media",
                             "links",
                             "design",
@@ -40697,6 +42191,14 @@
                                   }
                                 }
                               }
+                            },
+                            "comments": {
+                              "type": "integer",
+                              "description": "Approved comments imported onto imported posts (re-imports add none)"
+                            },
+                            "pingbacks_skipped": {
+                              "type": "integer",
+                              "description": "Pingbacks/trackbacks the source returned, not imported (WordPress's REST normally returns none)"
                             }
                           }
                         },
@@ -40705,6 +42207,17 @@
                         },
                         "updated_at": {
                           "type": "integer"
+                        },
+                        "next_step": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "While the job is in a running stage, the call that advances it (`POST /api/import/wordpress/{id}/step`). Nothing else advances it; null once paused, done or cancelled."
+                        },
+                        "stalled": {
+                          "type": "boolean",
+                          "description": "True when the job is in a running stage but no step has run for two minutes: whatever was driving it stopped."
                         }
                       }
                     }
@@ -40839,7 +42352,9 @@
                           "type": "string",
                           "enum": [
                             "pulling",
+                            "showcase",
                             "applying",
+                            "builder",
                             "media",
                             "links",
                             "design",
@@ -40948,6 +42463,14 @@
                                   }
                                 }
                               }
+                            },
+                            "comments": {
+                              "type": "integer",
+                              "description": "Approved comments imported onto imported posts (re-imports add none)"
+                            },
+                            "pingbacks_skipped": {
+                              "type": "integer",
+                              "description": "Pingbacks/trackbacks the source returned, not imported (WordPress's REST normally returns none)"
                             }
                           }
                         },
@@ -41021,7 +42544,9 @@
                           "type": "string",
                           "enum": [
                             "pulling",
+                            "showcase",
                             "applying",
+                            "builder",
                             "media",
                             "links",
                             "design",
@@ -41130,6 +42655,14 @@
                                   }
                                 }
                               }
+                            },
+                            "comments": {
+                              "type": "integer",
+                              "description": "Approved comments imported onto imported posts (re-imports add none)"
+                            },
+                            "pingbacks_skipped": {
+                              "type": "integer",
+                              "description": "Pingbacks/trackbacks the source returned, not imported (WordPress's REST normally returns none)"
                             }
                           }
                         },
@@ -41203,7 +42736,9 @@
                           "type": "string",
                           "enum": [
                             "pulling",
+                            "showcase",
                             "applying",
+                            "builder",
                             "media",
                             "links",
                             "design",
@@ -41312,6 +42847,14 @@
                                   }
                                 }
                               }
+                            },
+                            "comments": {
+                              "type": "integer",
+                              "description": "Approved comments imported onto imported posts (re-imports add none)"
+                            },
+                            "pingbacks_skipped": {
+                              "type": "integer",
+                              "description": "Pingbacks/trackbacks the source returned, not imported (WordPress's REST normally returns none)"
                             }
                           }
                         },
@@ -41426,7 +42969,7 @@
                       "enum": [
                         "done"
                       ],
-                      "description": "Always done here: a design still in its pages phase is not returned"
+                      "description": "Always done here: a design still in its pages, showcase (a design-only import bringing the posts its post grids show) or finish (the post grids resolved against those posts, then go-live) phase is not returned"
                     },
                     "pages": {
                       "type": "array",
@@ -41468,6 +43011,3016 @@
           },
           "503": {
             "description": "Import unavailable: tables not yet migrated, or the credential key is missing or rotated ({error:'import_unavailable'})"
+          }
+        }
+      }
+    },
+    "/api/pages/{id}/preview-url": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Pages"
+        ],
+        "summary": "GET /api/pages/{id}/preview-url",
+        "description": "A signed link that renders the page as it is now — a draft included — at `/page/<slug>?_preview=<token>`, always with `noindex, nofollow` (meta and `X-Robots-Tag`) and `Cache-Control: private, no-store`. The link opens only this page and expires after `ttlMinutes`. Nothing is stored, so this is a GET and read-only tokens may use it. Requires role editor or admin.",
+        "parameters": [
+          {
+            "name": "ttlMinutes",
+            "in": "query",
+            "required": false,
+            "description": "Link lifetime, 1-1440 minutes. Default 60.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1440,
+              "default": 60
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "description": "The preview link."
+                    },
+                    "expiresAt": {
+                      "type": "integer",
+                      "description": "Epoch seconds."
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "draft",
+                        "published"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "ttlMinutes out of range",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Requires the editor role or above.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/media/limits": {
+      "get": {
+        "tags": [
+          "Media"
+        ],
+        "summary": "Upload size limits for this site",
+        "description": "The effective per-site caps in bytes for image, video, audio and other files (defaults 20, 20, 20 and 50 MB). Anything over 20 MB goes through POST /api/media/uploads. Same roles as the upload routes.",
+        "operationId": "getMediaLimits",
+        "responses": {
+          "200": {
+            "description": "Effective caps in bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "image": {
+                      "type": "integer",
+                      "description": "Largest image upload, in bytes"
+                    },
+                    "video": {
+                      "type": "integer",
+                      "description": "Largest video upload, in bytes"
+                    },
+                    "audio": {
+                      "type": "integer",
+                      "description": "Largest audio upload, in bytes"
+                    },
+                    "file": {
+                      "type": "integer",
+                      "description": "Largest file upload, in bytes"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Role cannot upload"
+          }
+        }
+      }
+    },
+    "/api/comments": {
+      "get": {
+        "tags": [
+          "Comments"
+        ],
+        "summary": "List comments for moderation",
+        "operationId": "listComments",
+        "description": "With a session or token: the moderation list, newest first, with per-status counts for the caller's scope (without `status`, pending and approved). Without one (public, no auth): `?post=<id>` returns that published post's approved comments, oldest first, as `{comments: [{id, parent_id, author_name, author_url, content, created_at}], total}` — never an email; 400 `post_required` without `post`, 404 `not_found` for an unpublished post or while comments are off. A non-public `status` needs auth.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "spam",
+                "trash"
+              ]
+            }
+          },
+          {
+            "name": "post",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Only this post's comments"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of comments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "comments": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Comment"
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "description": "Matching comments (all pages)"
+                    },
+                    "counts": {
+                      "type": "object",
+                      "description": "Comments per status in the caller's scope (and post filter)",
+                      "properties": {
+                        "pending": {
+                          "type": "integer"
+                        },
+                        "approved": {
+                          "type": "integer"
+                        },
+                        "spam": {
+                          "type": "integer"
+                        },
+                        "trash": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Role cannot moderate comments ({error:'insufficient_role'}). Admin and editor moderate every comment; author and columnist only those on their own posts; others none."
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "404": {
+            "description": "Public list: the post is not published, or comments are off ({error:'not_found'})"
+          }
+        },
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Comments"
+        ],
+        "summary": "Bulk moderate comments",
+        "operationId": "bulkModerateComments",
+        "description": "Applies one action to up to 100 comments. Ids outside the caller's scope are left alone (not an error); `updated` counts the rows changed. `restore` returns a comment to approved if it was ever approved, else to pending. `delete` deletes forever (replies become top-level).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ids",
+                  "action"
+                ],
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "minItems": 1,
+                    "maxItems": 100
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "unapprove",
+                      "spam",
+                      "trash",
+                      "restore",
+                      "delete"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "updated": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Role cannot moderate comments ({error:'insufficient_role'}). Admin and editor moderate every comment; author and columnist only those on their own posts; others none."
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Comments"
+        ],
+        "summary": "Delete every comment by an email (erasure request)",
+        "operationId": "deleteCommentsByEmail",
+        "description": "Deletes forever every comment whose author_email matches (case-insensitive), on every post. Editor and admin only. Recorded in the audit log with the count, never the address.",
+        "parameters": [
+          {
+            "name": "author_email",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Below editor ({error:'insufficient_role'}), or a read-only token"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Comments"
+        ],
+        "summary": "Submit a comment (public)",
+        "operationId": "submitComment",
+        "security": [
+          {}
+        ],
+        "description": "The post page's comment form. No auth: same-origin only (Origin, else Referer, must be this site), a Cloudflare Turnstile token, a honeypot field, 5 submissions per 10 minutes per IP (the IP is kept only as a salted hash), length caps. Moderation (Settings → Comments): `first` holds an email's comment until one from it has been approved, `all` holds every comment, `none` holds none; more than 2 links always hold it. A form post (urlencoded/multipart) answers 303: to `/post/<slug>?cpage=<n>&c=<id>#comment-<id>` when approved, to `/post/<slug>?comment=held#respond` when held; a refusal is a small HTML page with the status below. A JSON body answers 201 / JSON errors. A filled honeypot looks like a held success and stores nothing.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "post_id",
+                  "name",
+                  "email",
+                  "content"
+                ],
+                "properties": {
+                  "post_id": {
+                    "type": "integer"
+                  },
+                  "parent_id": {
+                    "type": "integer",
+                    "description": "An approved comment on the same post"
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 254,
+                    "description": "Never published"
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "description": "Optional, http(s) only"
+                  },
+                  "content": {
+                    "type": "string",
+                    "maxLength": 5000,
+                    "description": "Plain text (blank lines are paragraphs) or a few tags; sanitised, no images, links rel=\"nofollow ugc noopener\""
+                  },
+                  "hp_website": {
+                    "type": "string",
+                    "description": "Honeypot: leave empty"
+                  },
+                  "cf-turnstile-response": {
+                    "type": "string",
+                    "description": "The Turnstile widget's token"
+                  }
+                }
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "post_id",
+                  "name",
+                  "email",
+                  "content"
+                ],
+                "properties": {
+                  "post_id": {
+                    "type": "integer"
+                  },
+                  "parent_id": {
+                    "type": "integer",
+                    "description": "An approved comment on the same post"
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 254,
+                    "description": "Never published"
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "description": "Optional, http(s) only"
+                  },
+                  "content": {
+                    "type": "string",
+                    "maxLength": 5000,
+                    "description": "Plain text (blank lines are paragraphs) or a few tags; sanitised, no images, links rel=\"nofollow ugc noopener\""
+                  },
+                  "hp_website": {
+                    "type": "string",
+                    "description": "Honeypot: leave empty"
+                  },
+                  "cf-turnstile-response": {
+                    "type": "string",
+                    "description": "The Turnstile widget's token"
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "post_id",
+                  "name",
+                  "email",
+                  "content"
+                ],
+                "properties": {
+                  "post_id": {
+                    "type": "integer"
+                  },
+                  "parent_id": {
+                    "type": "integer",
+                    "description": "An approved comment on the same post"
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 254,
+                    "description": "Never published"
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "description": "Optional, http(s) only"
+                  },
+                  "content": {
+                    "type": "string",
+                    "maxLength": 5000,
+                    "description": "Plain text (blank lines are paragraphs) or a few tags; sanitised, no images, links rel=\"nofollow ugc noopener\""
+                  },
+                  "hp_website": {
+                    "type": "string",
+                    "description": "Honeypot: leave empty"
+                  },
+                  "cf-turnstile-response": {
+                    "type": "string",
+                    "description": "The Turnstile widget's token"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "JSON body: created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "comment": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "post_id": {
+                          "type": "integer"
+                        },
+                        "parent_id": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "approved",
+                            "pending"
+                          ]
+                        }
+                      }
+                    },
+                    "location": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "303": {
+            "description": "Form body: back to the post (approved: at the comment; held: with the moderation notice)"
+          },
+          "400": {
+            "description": "invalid_body, invalid_name, invalid_email, invalid_url, invalid_content or invalid_parent"
+          },
+          "403": {
+            "description": "cross_origin, comments_closed (comments off, the post closed, or past close-after-N-days) or turnstile_failed"
+          },
+          "404": {
+            "description": "post_not_found: no such published post"
+          },
+          "429": {
+            "description": "rate_limited: 5 per 10 minutes per IP; Retry-After says when"
+          }
+        }
+      }
+    },
+    "/api/comments/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Comments"
+        ],
+        "summary": "Get one comment",
+        "operationId": "getComment",
+        "responses": {
+          "200": {
+            "description": "The comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "comment": {
+                      "$ref": "#/components/schemas/Comment"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Role cannot moderate comments ({error:'insufficient_role'}). Admin and editor moderate every comment; author and columnist only those on their own posts; others none."
+          },
+          "404": {
+            "description": "No such comment, or not one the caller may moderate ({error:'not_found'})"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Comments"
+        ],
+        "summary": "Moderate and/or edit a comment",
+        "operationId": "updateComment",
+        "description": "`action` moves it between statuses (`restore`: back to approved if it was ever approved, else pending); `content` replaces its text, through the same sanitiser as every comment (plain text: blank lines become paragraphs).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "unapprove",
+                      "spam",
+                      "trash",
+                      "restore"
+                    ]
+                  },
+                  "content": {
+                    "type": "string",
+                    "maxLength": 20000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "comment": {
+                      "$ref": "#/components/schemas/Comment"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Role cannot moderate comments ({error:'insufficient_role'}). Admin and editor moderate every comment; author and columnist only those on their own posts; others none."
+          },
+          "404": {
+            "description": "No such comment, or not one the caller may moderate ({error:'not_found'})"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Comments"
+        ],
+        "summary": "Delete a comment forever",
+        "operationId": "deleteComment",
+        "description": "Its replies stay, as top-level comments.",
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Role cannot moderate comments ({error:'insufficient_role'}). Admin and editor moderate every comment; author and columnist only those on their own posts; others none."
+          },
+          "404": {
+            "description": "No such comment, or not one the caller may moderate ({error:'not_found'})"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/comments/{id}/reply": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "Comments"
+        ],
+        "summary": "Reply as the signed-in user",
+        "operationId": "replyToComment",
+        "description": "Posts a reply under comment {id} on the same post, as the caller (name, email and user id from the account), approved at once. A pending parent is approved too.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "content"
+                ],
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "maxLength": 20000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The comment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "comment": {
+                      "$ref": "#/components/schemas/Comment"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Role cannot moderate comments ({error:'insufficient_role'}). Admin and editor moderate every comment; author and columnist only those on their own posts; others none."
+          },
+          "404": {
+            "description": "No such comment, or not one the caller may moderate ({error:'not_found'})"
+          },
+          "409": {
+            "description": "The parent is in spam or trash ({error:'parent_not_visible'})"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/import/wordpress/{id}/media": {
+      "get": {
+        "tags": [
+          "Import"
+        ],
+        "summary": "List the import's files still to copy (admin)",
+        "description": "P3c, the uploads folder: the job's staged media rows (each an old file URL), 1000 per page, for the import screen to match against the owner's wp-content/uploads zip (unzipped in the browser; the Worker never sees the zip). Pass `next` back as `after` for the next page.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of staged files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "next": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Not an admin"
+          },
+          "404": {
+            "description": "Unknown import, or (POST) a url that is not one of its media rows ({error:'not_found'})"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Import"
+        ],
+        "summary": "Send one file from the uploads folder (admin)",
+        "description": "P3c: the body is one file's bytes (Content-Length required, at most the site's upload limit for its type, rechecked here) for a staged media row named by `url`. It is stored and recorded exactly as the media stage records a downloaded file (same /media/ key, media row, import map and a 301 from its old /wp-content/uploads/ path), so links and redirects work unchanged, and is never downloaded from the old site. With `skip=too_large` (no body) the file is left out and listed in report.media.too_large. A row no longer staged answers 200 {status} and changes nothing.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "url",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "too_large"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Skipped, or already handled ({status})",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "applied"
+                      ]
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad skip value, or the body did not match its Content-Length"
+          },
+          "409": {
+            "description": "The import is done or cancelled ({error:'job_finished'})"
+          },
+          "411": {
+            "description": "Content-Length required"
+          },
+          "413": {
+            "description": "Over the site's upload limit for its type; the file is left out"
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Not an admin"
+          },
+          "404": {
+            "description": "Unknown import, or (POST) a url that is not one of its media rows ({error:'not_found'})"
+          }
+        }
+      }
+    },
+    "/api/maintenance": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "GET /api/maintenance",
+        "description": "Maintenance mode: while `enabled`, the public site answers 503 with a holding page (JSON `{\"error\":\"maintenance\"}` under /api/) to everyone but staff sessions, staff PATs and holders of a 7-day pass from the access code. Any staff role may read. The code is write-only: reads report `code_set`.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceState"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "PUT /api/maintenance",
+        "description": "Admin only. Every field optional. `code`: 6-64 characters, or \"\" to remove it (then only staff and PATs get in). Setting or clearing the code, and switching from off to on, ends every pass already given out. A successful write purges the site's cached pages.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "code": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/maintenance": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "GET /api/maintenance",
+        "description": "Maintenance mode: while `enabled`, the public site answers 503 with a holding page (JSON `{\"error\":\"maintenance\"}` under /api/) to everyone but staff sessions, staff PATs and holders of a 7-day pass from the access code. Any staff role may read. The code is write-only: reads report `code_set`.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceState"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "PUT /api/maintenance",
+        "description": "Admin only. Every field optional. `code`: 6-64 characters, or \"\" to remove it (then only staff and PATs get in). Setting or clearing the code, and switching from off to on, ends every pass already given out. A successful write purges the site's cached pages.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "code": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/age-gate": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "GET /api/age-gate",
+        "description": "Age gate: while `enabled`, visitors confirm they are at least `min_age` before a page renders (a `__Host-ep_age` cookie; `remember_days` 0 = until the browser closes, else that many days). `scope` `site` gates every page; `selected` gates only the pages (CMS `pages.id`; store custom pages, `templates.id`) and categories listed in `page_ids`/`category_ids`, and their posts or products; on a store also the blog posts in `post_ids`, or with `blog_all` /blog, its pages and every post. Listings, feeds, sitemaps, legal pages, /admin and /api are never gated; staff sessions pass. Under `selected`, on-page listings, site search and the RSS feed leave gated posts, products and pages out for a visitor who has not confirmed (under `site` the feed lists no items), as does an anonymous GET /api/posts listing (PAT and session callers are unfiltered); sitemaps and the rest of the API do not. CMS: any staff role may read, admin writes. Store: admin only. The signing secret is never returned.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgeGateState"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "PUT /api/age-gate",
+        "description": "Admin only. Every field optional. At most 100 ids per list. `redirect_url` is empty or https (where Leave goes). Enabling with scope `selected` needs at least one page or category (store: or `blog_all`, or a post) (400 `invalid` with `detail`). Enabling, or changing `min_age`, `scope`, the id lists or `blog_all`, ends earlier confirmations. A successful write purges the site's cached pages. `blog_all` and `post_ids` are store settings: the CMS answers 400 `invalid` with that detail.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "min_age": {
+                    "type": "integer",
+                    "minimum": 13,
+                    "maximum": 25
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "site",
+                      "selected"
+                    ]
+                  },
+                  "page_ids": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "category_ids": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "remember_days": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 365
+                  },
+                  "redirect_url": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "heading": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "enter_label": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "leave_label": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "blog_all": {
+                    "type": "boolean",
+                    "description": "Store only."
+                  },
+                  "post_ids": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "description": "Store only: store_posts.id."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgeGateState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/age-gate": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "GET /api/age-gate",
+        "description": "Age gate: while `enabled`, visitors confirm they are at least `min_age` before a page renders (a `__Host-ep_age` cookie; `remember_days` 0 = until the browser closes, else that many days). `scope` `site` gates every page; `selected` gates only the pages (CMS `pages.id`; store custom pages, `templates.id`) and categories listed in `page_ids`/`category_ids`, and their posts or products; on a store also the blog posts in `post_ids`, or with `blog_all` /blog, its pages and every post. Listings, feeds, sitemaps, legal pages, /admin and /api are never gated; staff sessions pass. Under `selected`, on-page listings, site search and the RSS feed leave gated posts, products and pages out for a visitor who has not confirmed (under `site` the feed lists no items), as does an anonymous GET /api/posts listing (PAT and session callers are unfiltered); sitemaps and the rest of the API do not. CMS: any staff role may read, admin writes. Store: admin only. The signing secret is never returned.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgeGateState"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "PUT /api/age-gate",
+        "description": "Admin only. Every field optional. At most 100 ids per list. `redirect_url` is empty or https (where Leave goes). Enabling with scope `selected` needs at least one page or category (store: or `blog_all`, or a post) (400 `invalid` with `detail`). Enabling, or changing `min_age`, `scope`, the id lists or `blog_all`, ends earlier confirmations. A successful write purges the site's cached pages. `blog_all` and `post_ids` are store settings: the CMS answers 400 `invalid` with that detail.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "min_age": {
+                    "type": "integer",
+                    "minimum": 13,
+                    "maximum": 25
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "site",
+                      "selected"
+                    ]
+                  },
+                  "page_ids": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "category_ids": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "remember_days": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 365
+                  },
+                  "redirect_url": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "heading": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "enter_label": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "leave_label": {
+                    "type": "string",
+                    "maxLength": 40
+                  },
+                  "blog_all": {
+                    "type": "boolean",
+                    "description": "Store only."
+                  },
+                  "post_ids": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "description": "Store only: store_posts.id."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgeGateState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/ReadOnlyToken"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/staff": {
+      "get": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "GET /api/v1/staff",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Area `staff`: admin only (a manager, orders or content person gets 403 `insufficient_role` with `area: \"staff\"`). Session only: staff routes are never writable with a PAT (`patWriteAllowed: false`), a PAT write answers 403 `session_required`. Everyone who can sign in to this store admin: EdgePress (SSO) admins (`kind: \"sso\"`, role `admin`) and store-only staff (`kind: \"local\"`, role manager|orders|content), plus the open invites. EdgePress support rows are not listed.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "staff": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "email": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string",
+                            "enum": [
+                              "admin",
+                              "manager",
+                              "orders",
+                              "content"
+                            ]
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "sso",
+                              "local"
+                            ]
+                          },
+                          "totp_enabled": {
+                            "type": "boolean"
+                          },
+                          "last_login": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "description": "Epoch seconds."
+                          },
+                          "status": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "invites": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StaffInvite"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/staff/{id}": {
+      "put": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "PUT /api/v1/staff/{id}",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Area `staff`: admin only (a manager, orders or content person gets 403 `insufficient_role` with `area: \"staff\"`). Session only: staff routes are never writable with a PAT (`patWriteAllowed: false`), a PAT write answers 403 `session_required`. Change a store-only person's role. Ends their sessions (they sign in again with the new role). Admins come only from EdgePress sign-in, so an SSO admin id answers 404 `not_local_staff`. Audited as `staff.role_change`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "manager",
+                      "orders",
+                      "content"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_role`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "`not_local_staff`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "DELETE /api/v1/staff/{id}",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Area `staff`: admin only (a manager, orders or content person gets 403 `insufficient_role` with `area: \"staff\"`). Session only: staff routes are never writable with a PAT (`patWriteAllowed: false`), a PAT write answers 403 `session_required`. Remove a store-only person: the row is set inactive and their sessions end. Their email can be invited again later. SSO admins cannot be removed here (404 `not_local_staff`); remove a collaborator on app.edgepress.cc. Audited as `staff.remove`.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "`not_local_staff`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/staff-invites": {
+      "get": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "GET /api/v1/staff-invites",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Area `staff`: admin only (a manager, orders or content person gets 403 `insufficient_role` with `area: \"staff\"`). Session only: staff routes are never writable with a PAT (`patWriteAllowed: false`), a PAT write answers 403 `session_required`. Open invites: not redeemed, not cancelled, not expired (they last 7 days). The join link is never returned here; resend to get a fresh one.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "invites": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/StaffInvite"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "POST /api/v1/staff-invites",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Area `staff`: admin only (a manager, orders or content person gets 403 `insufficient_role` with `area: \"staff\"`). Session only: staff routes are never writable with a PAT (`patWriteAllowed: false`), a PAT write answers 403 `session_required`. Invite a person by email with a role. The invite is mailed from the store's own Brevo account (Settings → Email account) and the link is also returned so the admin can pass it on by hand. `invite_url` is the one-time join link; it is shown only here and in the email. `mailed` says whether the email was accepted for sending; `mail` says why not. Audited as `staff.invite`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "role"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "maxLength": 254
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "manager",
+                      "orders",
+                      "content"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "invite_url",
+                    "mailed",
+                    "mail"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "invite_url": {
+                      "type": "string"
+                    },
+                    "mailed": {
+                      "type": "boolean",
+                      "description": "`mail === 'sent'`."
+                    },
+                    "mail": {
+                      "type": "string",
+                      "enum": [
+                        "sent",
+                        "no_account",
+                        "failed",
+                        "rate_limited"
+                      ],
+                      "description": "What became of the invitation email, sent on the site's own Brevo account: `sent`; `no_account` (no account connected, nothing sent); `failed` (Brevo or the link refused it); `rate_limited` (over the hourly mail cap). Anything but `sent`: hand `invite_url` over yourself."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_email` or `invalid_role`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "`already_has_access` (an active user has this email) or `pending_invite_exists`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/staff-invites/{id}": {
+      "delete": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "DELETE /api/v1/staff-invites/{id}",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Area `staff`: admin only (a manager, orders or content person gets 403 `insufficient_role` with `area: \"staff\"`). Session only: staff routes are never writable with a PAT (`patWriteAllowed: false`), a PAT write answers 403 `session_required`. Cancel an open invite; its link stops working. Audited as `staff.invite_cancel`.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "`not_found` (already redeemed, cancelled or never existed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/staff-invites/{id}/resend": {
+      "post": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "POST /api/v1/staff-invites/{id}/resend",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Area `staff`: admin only (a manager, orders or content person gets 403 `insufficient_role` with `area: \"staff\"`). Session only: staff routes are never writable with a PAT (`patWriteAllowed: false`), a PAT write answers 403 `session_required`. Mint a new token for an open invite (the old link stops working), extend it to 7 days from now and mail it again. `invite_url` is the one-time join link; it is shown only here and in the email.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "invite_url",
+                    "mailed",
+                    "mail"
+                  ],
+                  "properties": {
+                    "invite_url": {
+                      "type": "string"
+                    },
+                    "mailed": {
+                      "type": "boolean",
+                      "description": "`mail === 'sent'`."
+                    },
+                    "mail": {
+                      "type": "string",
+                      "enum": [
+                        "sent",
+                        "no_account",
+                        "failed",
+                        "rate_limited"
+                      ],
+                      "description": "What became of the invitation email, sent on the site's own Brevo account: `sent`; `no_account` (no account connected, nothing sent); `failed` (Brevo or the link refused it); `rate_limited` (over the hourly mail cap). Anything but `sent`: hand `invite_url` over yourself."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "`not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/staff-settings": {
+      "get": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "GET /api/v1/staff-settings",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Area `staff`: admin only (a manager, orders or content person gets 403 `insufficient_role` with `area: \"staff\"`). Session only: staff routes are never writable with a PAT (`patWriteAllowed: false`), a PAT write answers 403 `session_required`. Whether two-factor is required for store-only staff.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "PUT /api/v1/staff-settings",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Area `staff`: admin only (a manager, orders or content person gets 403 `insufficient_role` with `area: \"staff\"`). Session only: staff routes are never writable with a PAT (`patWriteAllowed: false`), a PAT write answers 403 `session_required`. Require two-factor for all store-only staff. Turning it on ends the sessions of staff who have no two-factor yet, so their next sign-in lands on the setup page and nothing else works until they finish it. SSO admins are unaffected (their two-factor is the EdgePress account's). Audited as `staff.require_2fa`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "require_2fa"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "require_2fa": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid` (not a boolean).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/me/password": {
+      "put": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "PUT /api/v1/me/password",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Store-only staff change their own password (area `self`, any role). Every other session of theirs ends; the calling browser gets a fresh session cookie. A PAT write is refused 403 `session_required`; an SSO admin has no store password and gets 404 `not_local_staff`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "current",
+                  "password"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "current": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 12,
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Changed; `Set-Cookie` carries the new session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`weak_password` (12-200 characters).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "`wrong_password`, or the standard Forbidden bodies.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_local_staff`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/v1/me/2fa": {
+      "get": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "GET /api/v1/me/2fa",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Store-only staff: is an authenticator app set up, and does the owner require one. SSO admins get 404 `not_local_staff`.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "404": {
+            "description": "`not_local_staff`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "POST /api/v1/me/2fa",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Begin setup: a new secret is stored pending (two-factor stays off until the code is confirmed with PUT). Show `otpauth_uri` as a QR code or the `secret` as text.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "secret": {
+                      "type": "string"
+                    },
+                    "otpauth_uri": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "404": {
+            "description": "`not_local_staff`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`already_enabled` (disable first).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "`two_factor_unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "PUT /api/v1/me/2fa",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Confirm setup with a current 6-digit code; turns two-factor on and clears the setup gate if the owner requires it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "code"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "`invalid_code`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_local_staff`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "`two_factor_unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Staff"
+        ],
+        "summary": "DELETE /api/v1/me/2fa",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "**Store tenants only** (a CMS tenant has no such route and answers 404). Turn two-factor off; needs the current password and a current code. Every session of theirs ends, as with a password change; the calling browser gets a fresh session cookie.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password",
+                  "code"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "`wrong_password` or `invalid_code`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_local_staff`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`two_factor_required` (the owner requires it for all staff).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "`two_factor_unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/staff-auth/invite": {
+      "get": {
+        "tags": [
+          "Store staff sign-in (browser only)"
+        ],
+        "summary": "GET /api/staff-auth/invite",
+        "description": "**Store tenants only. Browser only:** public (no token), meant for the store admin's own sign-in pages, not for agents or PATs. Every POST needs a same-origin `Origin` (or `Referer`) header, else 403 `cross_site`. What the join page shows before the person sets a password. Not same-origin checked (read only). The invite token is a query parameter.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "email": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string",
+                      "enum": [
+                        "manager",
+                        "orders",
+                        "content"
+                      ]
+                    },
+                    "store_name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`invite_invalid` (expired, cancelled, used or unknown).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/staff-auth/accept": {
+      "post": {
+        "tags": [
+          "Store staff sign-in (browser only)"
+        ],
+        "summary": "POST /api/staff-auth/accept",
+        "description": "**Store tenants only. Browser only:** public (no token), meant for the store admin's own sign-in pages, not for agents or PATs. Every POST needs a same-origin `Origin` (or `Referer`) header, else 403 `cross_site`. Redeem an invite: creates the store-only person with the invited role, sets their password and signs them in (`Set-Cookie: auth_session`). `next` is where to go (`/admin/two-factor` when the owner requires two-factor).",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token",
+                  "name",
+                  "password"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 12,
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_name` or `weak_password`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`cross_site`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`invite_invalid`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/staff-auth/login": {
+      "post": {
+        "tags": [
+          "Store staff sign-in (browser only)"
+        ],
+        "summary": "POST /api/staff-auth/login",
+        "description": "**Store tenants only. Browser only:** public (no token), meant for the store admin's own sign-in pages, not for agents or PATs. Every POST needs a same-origin `Origin` (or `Referer`) header, else 403 `cross_site`. Store-only staff sign-in. Unknown email, wrong password and an SSO row all answer the same 401. Every attempt is counted before the password is checked: 5 per email in 10 minutes (a successful sign-in clears that count) or 30 per IP in 10 minutes lock sign-in (429 `rate_limited`) until the window ends. With two-factor on, answers `{needs_2fa, challenge}` (valid 5 minutes) and no cookie: continue at login-2fa.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in (`Set-Cookie`, `next`) or a two-factor challenge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next": {
+                      "type": "string"
+                    },
+                    "needs_2fa": {
+                      "type": "boolean"
+                    },
+                    "challenge": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_credentials`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`cross_site`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/staff-auth/login-2fa": {
+      "post": {
+        "tags": [
+          "Store staff sign-in (browser only)"
+        ],
+        "summary": "POST /api/staff-auth/login-2fa",
+        "description": "**Store tenants only. Browser only:** public (no token), meant for the store admin's own sign-in pages, not for agents or PATs. Every POST needs a same-origin `Origin` (or `Referer`) header, else 403 `cross_site`. Second step of a sign-in with two-factor on. The challenge is single-use: a wrong code ends it and the person signs in again. At most 5 codes per person per 10 minutes are checked.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "challenge",
+                  "code"
+                ],
+                "properties": {
+                  "challenge": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in (`Set-Cookie`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "next": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`invalid_code`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`cross_site`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`challenge_expired`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "`two_factor_unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/staff-auth/reset-request": {
+      "post": {
+        "tags": [
+          "Store staff sign-in (browser only)"
+        ],
+        "summary": "POST /api/staff-auth/reset-request",
+        "description": "**Store tenants only. Browser only:** public (no token), meant for the store admin's own sign-in pages, not for agents or PATs. Every POST needs a same-origin `Origin` (or `Referer`) header, else 403 `cross_site`. Mail a one-hour password-reset link to a store-only person. Always 202 with `{}` whether or not the email belongs to anyone, so the answer never says who works here (also 202 when rate limited: 5 per 10 minutes per IP and per email).",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`cross_site`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/staff-auth/reset": {
+      "post": {
+        "tags": [
+          "Store staff sign-in (browser only)"
+        ],
+        "summary": "POST /api/staff-auth/reset",
+        "description": "**Store tenants only. Browser only:** public (no token), meant for the store admin's own sign-in pages, not for agents or PATs. Every POST needs a same-origin `Origin` (or `Referer`) header, else 403 `cross_site`. Set a new password from a reset link. Single use; ends every session of that person.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token",
+                  "password"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 12,
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`weak_password`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`cross_site`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`reset_invalid`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/staff-auth/logout": {
+      "post": {
+        "tags": [
+          "Store staff sign-in (browser only)"
+        ],
+        "summary": "POST /api/staff-auth/logout",
+        "description": "**Store tenants only. Browser only:** public (no token), meant for the store admin's own sign-in pages, not for agents or PATs. Every POST needs a same-origin `Origin` (or `Referer`) header, else 403 `cross_site`. End this browser's session and clear the `auth_session` cookie.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`cross_site`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
       }

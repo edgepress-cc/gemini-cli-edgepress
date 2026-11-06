@@ -29,6 +29,16 @@ Toggle public signup:
 ep PUT /settings/public-signup '{"enabled":true}'
 ```
 
+Choose the page `/` shows (empty = the home design):
+
+```bash
+ep PUT /settings '{"option_name":"front_page_id","option_value":"7"}'
+```
+
+The page must exist and be published (else 400 `invalid_front_page`). While it is the home
+page, its `/page/<slug>` 301s to `/`, and if it is later unpublished or deleted, `/` falls back
+to the home design.
+
 ## Response shape
 
 `GET /settings` returns the full list of option rows:
@@ -43,14 +53,15 @@ ep PUT /settings/public-signup '{"enabled":true}'
 
 ## Theme settings
 
-Two keys are validated on PUT/POST (the only ones that are):
+Three keys are validated on PUT/POST (the only ones that are):
 
 | Key | Shape |
 |---|---|
 | `theme_palette` | `{primary, accent, text, background, muted, surface}` — each `#rrggbb` |
 | `theme_fonts` | `{body, heading, mono}` — each a self-hosted family name or `"system"` |
+| `color_scheme` | a plain string, not JSON: `"auto"` (the default, also when unset — follow the visitor's device, light or dark) or `"light"` (never dark; applying a WordPress design sets it, applying a starter design resets it to `"auto"`) |
 
-Every key inside is optional; unknown keys are rejected. Send the object or
+For the two JSON keys, every key inside is optional; unknown keys are rejected. Send the object or
 its JSON string — both are accepted, and both are stored as the JSON string:
 
 ```json
@@ -75,7 +86,7 @@ ticker block config; the schema rejects `weatherApiKey`.
 
 ## Gotchas
 
-- **All values are strings** — except the two theme keys above, which also
+- **All values are strings** — except `theme_palette`/`theme_fonts` above, which also
   accept an object. Booleans arrive as `"true"`/`"false"`, numbers as `"42"`.
   Compare and write them as strings; don't send raw JSON booleans in
   `option_value`.
@@ -92,7 +103,7 @@ ticker block config; the schema rejects `weatherApiKey`.
   `public_signup_enabled` directly, since it applies validation.
 - There is no schema for option names: a typo'd `option_name` on PUT/POST
   quietly creates a new, unused row instead of erroring (only the values of
-  `theme_palette`/`theme_fonts` are checked, and only under those exact
+  `theme_palette`/`theme_fonts`/`color_scheme` are checked, and only under those exact
   names). Read the existing keys first and match names exactly.
 - Deleting a load-bearing key (e.g. `site_title`) breaks rendering with no
   API-side guard. Only DELETE rows the user explicitly names, and confirm.

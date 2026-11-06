@@ -243,8 +243,10 @@ ep PUT /posts/42 "$(cat /tmp/merged.json)"
 
 ### Rate limit
 
-60 requests/min per token. A 429 response carries `Retry-After` — `ep`
-surfaces the full error body on stderr. If a task will need more than ~30
+60 requests/min per token. Every response reports the budget in
+`X-RateLimit-Remaining` (and `X-RateLimit-Reset`, epoch seconds), so pace a
+long run from it instead of discovering the limit. A 429 response carries
+`Retry-After` — `ep` surfaces the full error body on stderr. If a task will need more than ~30
 calls, don't do it in the main loop: batch what the API supports (e.g.
 `POST /podcasts/bulk`) or hand off to the subagent.
 
@@ -284,8 +286,8 @@ user. Do not shadow it by making the same calls yourself while it runs.
   PATs. Refuse writes up front instead of letting them 403 one by one.
   A read-only token ALSO cannot GET these six, which is a change — it could
   until the P5 authorization layer shipped. On each the read is itself the
-  privileged act, so the token is 403 `read_only_token` in the middleware,
-  before the handler runs:
+  privileged act, so the token is 403 `read_only_token` (in the middleware,
+  before the handler runs; a CMS site refuses `/email-credentials` in its handler):
   `/customers/{id}/export`, `/customers/{id}/tax-ids/{tid}`,
   `/email-credentials`, `/gateway-credentials`,
   `/suppliers/{supplierId}/credentials`, `/tax/provider-credentials`.
@@ -337,7 +339,8 @@ DELETE /posts/:id            delete
 
 Common fields: `title`, `slug`, `content`, `excerpt`, `status`
 (`draft|published|scheduled`), `scheduled_at`, `featured_image_id`,
-`category_ids`, `tag_ids`, `pen_name_id`. Non-obvious: `slug` is derived from
+`category_ids`, `tag_ids`, `pen_name_id`, `comment_status`
+(`inherit|open|closed`; `inherit` = the site's comments settings). Non-obvious: `slug` is derived from
 `title` on create if omitted — set it explicitly for stable URLs.
 
 ### Pages — CMS
@@ -354,6 +357,8 @@ Same shape as posts but no `scheduled_at`. Page taxonomy endpoints are
 `/pages/categories` and `/pages/tags` — never the post ones.
 
 ### Media — CMS
+
+(A store has its own media library with the same upload path — see Store operations.)
 
 ```
 GET    /media          list
@@ -438,10 +443,50 @@ GET    /settings                  all settings (auth'd)
 GET    /settings/public           public subset (no auth)
 PUT    /settings                  update keys (admin)
 GET/PUT /settings/public-signup   public signup toggle
+GET/PUT /maintenance              close the site while building (CMS + store; admin PUT)
+GET/PUT /age-gate                 "are you 18?" gate (CMS + store; admin PUT, store GET admin too)
 ```
 
+`/maintenance` takes `{enabled, message, code}`; `code` is write-only (6-64 chars, `""` removes it) and reads
+return `code_set`. While enabled, visitors get 503; your PAT and staff sessions still pass.
+
+`/age-gate` takes `{enabled, min_age 13-25, scope site|selected, page_ids, category_ids (≤100 each), remember_days
+0-365 (0 = until the browser closes), redirect_url (empty or https), heading, message, enter_label, leave_label}`; 400
+`{error:'invalid', detail}`. Store only: `blog_all` (gate `/blog` and every post) and `post_ids` (≤100
+`store_posts.id`, gated at `/blog/<slug>`); the CMS refuses both with 400. `selected` gates only the listed pages (CMS
+`pages.id`; store custom pages), posts or products in the listed categories, and the store's picked blog posts; listings, feeds, sitemaps, legal pages, /admin and /api are never gated, and staff
+sessions and PATs pass. Under `selected`, on-page listings, site search and the RSS feed leave gated items out for a
+visitor who has not confirmed (`site`: the feed lists no items), and so does an anonymous `GET /posts` listing (a PAT
+or session caller sees everything); sitemaps and the rest of the API still list them. Enabling or changing
+age/scope/ids/`blog_all` ends earlier confirmations. The secret is never returned.
+
 Key-value store. Common keys: `site_title`, `site_description`,
-`public_signup_enabled`. PUT only the keys you're changing.
+`public_signup_enabled`. PUT only the keys you're changing. Comments keys
+(validated, 400 `invalid_comment_setting`): `comments_enabled` (`true|false`,
+default false), `comments_moderation` (`first` — default: an email's first
+comment is held | `all` | `none`), `comments_close_days` (0 = never, default 90),
+`comments_notify` (`true|false`, default true: email admins about held comments).
+
+### Comments — CMS
+
+```
+GET    /comments?status=pending&post=<id>&limit=20&offset=0   { comments, total, counts: {pending, approved, spam, trash} }
+PATCH  /comments            { ids: [..≤100], action }   bulk: approve|unapprove|spam|trash|restore|delete
+GET    /comments/:id        PATCH /comments/:id { action?, content? }    DELETE /comments/:id (forever)
+POST   /comments/:id/reply  { content } — reply as yourself, approved at once (approves a pending parent)
+DELETE /comments?author_email=…   erase every comment by that email (editor+)
+```
+
+Public, no auth: `POST /comments` is the post page's comment form (same-origin
+only, Turnstile, 5 per 10 min per IP) — not for agents; `GET /comments?post=<id>`
+lists a published post's approved comments (no emails). Everything else here
+needs a token.
+Admin/editor moderate everything; author/columnist only comments on their own
+posts and never see `author_email`. `restore` goes back to approved if it was
+ever approved, else pending. `delete` is permanent (replies become top-level);
+prefer `trash`. Content is sanitised (no images; links get
+`rel="nofollow ugc noopener"`); plain text becomes paragraphs. A WordPress
+import brings approved comments and turns `comments_enabled` on.
 
 ### API tokens — BOTH products
 
@@ -512,7 +557,12 @@ POST /onboarding/wp-scan         { url?, username?, app_password? } — WordPres
 
 All four are admin only. The scan stores its report (counts, theme, fidelity, palette) on the
 onboarding row and returns it; a site that cannot be scanned is a 422 whose
-`detail` says why. The Application Password (https only) is used for that one
+`detail` says why. `url` is the address as a person types it: the scheme is
+optional (`example.com` means `https://example.com`), and a pasted
+`/wp-admin/`, `/wp-login.php`, query or fragment is cut back to the site. A
+value that is not a public site address (an email, an IP, `localhost`, no
+domain ending) is `400 invalid_url` with a `detail` to show the user; the
+import (`POST /import/wordpress`) cleans and refuses `url` the same way. The Application Password (https only) is used for that one
 request and is **never stored or returned** — never log it or echo it back
 to the user either.
 
@@ -520,14 +570,34 @@ to the user either.
 
 ```
 POST /import/wordpress               { url?, username?, app_password? } — start; 201 { job }, 5 per site per hour
-GET  /import/wordpress/{id}          { job: { id, source_url, state, counts, last_error, report, … } }
+GET  /import/wordpress               { job } — the unfinished import, or { job: null }
+GET  /import/wordpress/{id}          { job: { id, source_url, state, counts, last_error, report, next_step, stalled, … } }
 POST /import/wordpress/{id}/step     one unit of work; call until state is "done" ({ busy: true } = retry)
 POST /import/wordpress/{id}/pause    POST …/resume    POST …/cancel
+GET  /import/wordpress/{id}/media    { items: [{ id, url }], next } — files still to copy (?after=next for more)
+POST /import/wordpress/{id}/media?url=…   raw file bytes for one of them (uploads folder); &skip=too_large leaves it out
 ```
 
+**From an export file instead** (a site that blocks the REST API, is private or
+already switched off): upload the `.xml` from WordPress → Tools → Export
+(≤ 500 MB) through the chunked upload with `purpose: "wordpress_export"`
+(`POST /media/uploads {name, size, purpose}` → parts → `…/complete` answers
+`{export_id}`), then `POST /import/wordpress { export_id }`. Same steps, same
+report (`report.source: "export"`). Files are downloaded from the old site only
+if its address still answers; otherwise send them from the owner's
+`wp-content/uploads` copy through `…/{id}/media` while the job is in `media`
+(before its next step). Without a live site there is no design import
+(`report.design.notes: ["design_offline"]`): offer a starter design.
+
 All admin only; one active import per site (409 `import_active` with its
-`job_id`). Add-only: content already on the site is never modified; a re-run
-imports only what is new. Three failed steps in a row pause the job — read
+`job_id`). **Nothing advances the job but `…/step` calls** — the import screen
+makes them while it is open. Stop calling and the job just waits, mid-stage:
+images stay on the old site and links and featured images (the later `links`
+stage) are never fixed. Keep calling `next_step` until it is null; `stalled:
+true` means no step has run for two minutes. Add-only: content already on the site is never modified; a re-run
+imports only what is new. Approved comments come after the posts (threads
+kept; `report.comments`, `report.pingbacks_skipped`); with an Application
+Password that can moderate, their emails too. Three failed steps in a row pause the job — read
 `last_error`, then resume. The Application Password (https only) is stored
 encrypted only until the import finishes or is cancelled, then deleted; it is
 **never returned** — never log or echo it. 503 `import_unavailable` is an
@@ -559,7 +629,7 @@ settings, an orders API, the payment-method CRUD, the write-only
 gateway-credentials API, the write-only email-credentials API, the
 read-only email-log API, the customers API (list, detail, the
 operator-owned profile fields, tax IDs, read-only address book, the
-account-integrity actions and the data export), the API-token list, and the read-only audit log — nothing else. **Cost and margin are OPERATOR-ONLY data: `cost_price`
+account-integrity actions and the data export), the API-token list, the media library, and the read-only audit log — nothing else. **Cost and margin are OPERATOR-ONLY data: `cost_price`
 (products), `cost_snapshot` and `margin` (orders/order items) exist ONLY in
 these `/api/v1` operator endpoints and appear on NO shopper-facing surface —
 not the storefront catalogue, not the cart, not the checkout confirmation,
@@ -604,6 +674,10 @@ POST   /api/v1/products/bulk       {ids, action: enable|disable|delete|add_categ
 GET    /api/v1/tags                list tags with product_count (most used first); tags are born on products, never created here
 PATCH  /api/v1/tags/{id}           rename ({name}; slug follows; 409 on a clash)
 DELETE /api/v1/tags/{id}           drop the tag from every product
+GET    /api/v1/media               the media library, newest first (?limit=1-200, ?before={next_before} for the next page): files on the shop's own domain — PDF catalogues, images, MP4/WebM, MP3/WAV/OGG
+POST   /api/v1/media               upload ONE file, multipart field `file`, ≤20MB → 201 {id, location, media}; live at once at /media/uploads/library/<uuid>/<name>. Use this for PDFs and other downloads — never a hidden draft product
+POST   /api/v1/media/upload        the same upload at the CMS's path (what the MCP ep_media_upload tool calls)
+GET/PUT/PATCH/DELETE /api/v1/media/{id}  one file; PUT/PATCH take display_name and alt_text only (400 unknown_field:<name> otherwise); DELETE removes the file and its URL stops working — check where it is linked first
 GET    /api/v1/discounts           list discounts (?status=; rows carry parsed scope/conditions, usage_count, redemption_count)
 POST   /api/v1/discounts           create ({title, kind: percent|fixed|free_shipping|bxgy (with reward: {buy:{scope, quantity|spend}, get:{scope, quantity, percent}, repeats?, max_rewards?}), value (bp | minor units | 0), applies_to? (goods|shipping — percent/fixed only), code? (A-Z0-9_- 3-32, uppercased; omit for AUTOMATIC), scope?, conditions? (incl. shipping_methods?: [method ids]), combinable?, priority?, starts_at?, ends_at?})
 GET/PATCH/DELETE /api/v1/discounts/{id}   read / partial update / delete (409 has_redemptions — archive instead)
@@ -663,7 +737,7 @@ GET    /api/v1/tax/provider-credentials   whether a TaxJar token is stored, per 
 PUT    /api/v1/tax/provider-credentials   store (create or replace) the TaxJar token for one mode: exactly {provider: "taxjar", mode: "test"|"live", api_token} (non-empty, ≤500 chars); unknown field is a 400 unknown_field:<name>; success body is {"success": true, "configured": true} and nothing more; 503 gateway_credentials_unavailable until the platform encryption key is configured; audited tax.credentials.set (provider + mode only, never the token)
 DELETE /api/v1/tax/provider-credentials?mode=test|live   delete the stored token for that mode (404 if none); audited tax.credentials.delete
 POST   /api/v1/tax/preview         DRY-RUN the tax engine: {address: {country, region_code?, postcode?}, lines: [{amount (minor units, net of discounts), tax_class_id?}], shipping? (minor units), customer_type? (individual|business), tax_id_valid_country? (simulate a valid eu_vat ID from that country — how reverse charge is previewed), exemption_country? + exemption_region_code? (simulate an APPROVED exemption certificate for that country / subdivision — how `exempt` is previewed; exemption beats reverse charge)} → the engine result (amount, bp, total, treatment, jurisdiction {basis, country, region_code, id}, provider (local|taxjar|local_fallback), fallback_reason, lines[] {id, amount, charged, rateBp, classSlug, jurisdictionId, tax}, shippingTax, shippingSplit, adjustment, breakdown — the same object an order's tax_breakdown holds); TaxJar is called for real when configured, nothing is written and nothing is audited (a provider failure quotes local as local_fallback with NO audit row); validates like checkout (400 invalid_tax_class for a class that is not this store's); a full-access token is required — the middleware treats every POST as a write
-GET    /api/v1/email-credentials   whether this store has a connected Brevo account: configured, from_address, from_name, timestamps ONLY — the API key is NEVER returned by any endpoint, there is no read-back call; no master-key gate, so this always answers even before the platform key is configured; NOT readable by a read-only PAT (403 read_only_token)
+GET    /api/v1/email-credentials   whether this store (or, on a CMS site, this site: one account, carrying staff invites, held-comment notices and member mail; admin only) has a connected Brevo account: configured, from_address, from_name, timestamps ONLY — the API key is NEVER returned by any endpoint, there is no read-back call; no master-key gate, so this always answers even before the platform key is configured; NOT readable by a read-only PAT (403 read_only_token)
 PUT    /api/v1/email-credentials   connect (or replace) this store's own Brevo account; body is exactly {api_key, from_address, from_name?} — unknown field is a 400 unknown_field:<name>; the key is verified against Brevo BEFORE it is stored (invalid_api_key if Brevo rejects it, sender_not_verified if from_address is not a verified sender on that account, verification_unavailable (503) if Brevo cannot be reached); success body is {"success": true, "configured": true} and nothing more; 503 email_credentials_unavailable until the platform encryption key is configured
 DELETE /api/v1/email-credentials   disconnect this store's Brevo account (removed: false, not an error, if nothing was configured); no master-key gate — clearing it decrypts nothing
 GET    /api/v1/customers           list shopper accounts, NEWEST FIRST, active and disabled alike; rows carry id, email, name, phone, status, email_verified_at, created_at, updated_at plus customer_type, tax_status (best across the customer's tax IDs: valid > manual_review > unavailable > unverified > invalid, else none) and company (business legal_name) — NEVER password_hash; C2 (1.23.0): rows also carry tags (names, []) and pending_exemptions (count, 0); filters ?tag=<slug> (unknown tag → empty page) and ?pending_exemptions=1 (both empty pre-0227/0230, never a 503); A1 (1.24.0): rows also carry deletion_requested_at (null when none / pre-0235) and gated (same rule as the detail's gated, from the store switch + stamp read once per request; false pre-0237) — the admin's "Unverified" badge is `gated`, NOT `email_verified_at IS NULL`
@@ -1574,6 +1648,51 @@ Returns `{"product": "store", "store": {"name", "description", "logo_url",
 "currency", "locale", "timezone", "status"}}`, or 503
 `{"product": "store", "error": "store_not_provisioned"}` before provisioning
 completes — either way, `product: "store"` confirms the tenant is a store.
+
+### Store staff and roles — store
+
+A store has four fixed roles: **admin** (EdgePress sign-in only: the owner and collaborators added on
+app.edgepress.cc), and three store-only roles that sign in with a store password after an emailed invite:
+**manager**, **orders**, **content**. Every operator route belongs to an access area; the server enforces it, and a
+role without access gets 403 `{ "error": "insufficient_role", "area": "<area>" }` (the CMS body carries `required`
+instead). `GET /users/me` returns `role`, `areas` (`[{area, write}]`; only `self` while a required two-factor setup is
+pending) and `local` (store-only account) — read it
+before attempting something a role may not do. Write implies read; "-" is 403.
+
+| Area | Routes | Admin | Manager | Orders | Content |
+|---|---|---|---|---|---|
+| `orders` | orders, orders/bulk, shipping-slip-token | write | write | write | - |
+| `money` | orders/{id}/payments (+revert), orders/{id}/refunds, PATCH orders/{id} to status `refunded` | write | write | - | - |
+| `customers` | customers (all sub-routes except export) | write | write | write | - |
+| `customer_export` | customers/{id}/export | write | write | - | - |
+| `catalog` | products (+images, variants, import, redirects), categories, tags, reviews, block-types | write | write | read | read |
+| `sales_setup` | discounts, shipping-zones, shipping-methods | write | write | read | - |
+| `content` | posts, media, templates, design/migrate, appearance/preview | write | write | - | write |
+| `submissions` | form-submissions | write | write | - | - |
+| `dashboard_summary` | dashboard/summary | write | write | read | - |
+| `dashboard_layout` | dashboard/layout | write | write | write | write |
+| `store_setup` | settings, settings/*, payment-methods, gateway-credentials, email-credentials, email-log, tax/*, suppliers, maintenance, age-gate, privacy-requests, api-tokens, audit-log | write | - | - | - |
+| `staff` | staff, staff/{id}, staff-invites, staff-invites/{id} (+resend), staff-settings | write | - | - | - |
+| `self` | users/me, me/password, me/2fa | write | write | write | write |
+
+Staff management is admin-only and **session-only: a PAT cannot manage staff** (`patWriteAllowed: false`, writes answer
+403 `session_required`). Only admins can create PATs, and a PAT acts as its creator, so no non-admin PAT exists.
+
+```
+GET    /staff                      { staff: [{id,email,name,role,kind sso|local,totp_enabled,last_login,status}], invites }
+PUT    /staff/:id    { role }      change a store-only person's role (manager|orders|content); ends their sessions
+DELETE /staff/:id                  remove a store-only person (SSO admins: 404 not_local_staff)
+GET/POST /staff-invites            POST { email, role } -> 201 { id, invite_url, mailed, mail }; mail: sent | no_account | failed | rate_limited; 409 already_has_access | pending_invite_exists
+DELETE /staff-invites/:id          cancel;  POST /staff-invites/:id/resend -> new link, 7 days
+GET/PUT /staff-settings            { require_2fa } - turning it on ends sessions of staff without two-factor
+PUT    /me/password  { current, password }   store-only staff, own password (12-200 chars)
+GET/POST/PUT/DELETE /me/2fa        status / begin / confirm { code } / disable { password, code } (disable ends their
+                                   other sessions; the calling browser gets a fresh cookie)
+```
+
+The `/api/staff-auth/*` routes (invite, accept, login, login-2fa, reset-request, reset, logout) are the store admin's
+own sign-in pages: **browser-only**, public, same-origin `Origin` required (else 403 `cross_site`), rate limited. An
+agent never calls them; to onboard someone, `POST /staff-invites` as an admin session and hand over `invite_url`.
 
 ## Reference index
 
