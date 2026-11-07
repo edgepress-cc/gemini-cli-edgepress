@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgePress Tenant API",
-    "version": "1.73.0",
+    "version": "1.74.0",
     "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`. Every token-authenticated response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` (epoch seconds); a 429 adds `Retry-After`."
   },
   "servers": [
@@ -28748,7 +28748,7 @@
             }
           },
           "409": {
-            "description": "Nothing refundable: no settled payment, an offline charge, already fully refunded, no gateway credential configured, or the balance changed concurrently (the loser of two simultaneous refunds — refused before the gateway is contacted); or the named charge is already fully refunded although the order still shows a balance (refund the rest outside the gateway, or name another charge_payment_id)",
+            "description": "Nothing refundable: no settled payment, an offline charge, already fully refunded, no gateway credential configured, or the balance changed concurrently (the loser of two simultaneous refunds — refused before the gateway is contacted); or the named charge is already fully refunded although the order still shows a balance (refund the rest outside the gateway, or name another charge_payment_id); or an Idempotency-Key replay that is pending, refused, or reused for a different refund",
             "content": {
               "application/json": {
                 "schema": {
@@ -28834,7 +28834,20 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "8-100 printable ASCII characters, unique per refund you mean to make. A request carrying a key this store has already seen does not refund again: it answers that refund's outcome (200 with replayed: true if it went through; 409 refund_pending while its outcome is unknown; 409 refund_refused if the provider refused it). The same key for a different order, amount or payment_id is 409 idempotency_key_reused. Send one, and reuse it when retrying after a lost response.",
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 100
+            }
+          }
+        ]
       }
     },
     "/api/v1/orders/{orderId}/shipping-slip-token": {
