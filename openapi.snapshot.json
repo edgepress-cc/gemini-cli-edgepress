@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgePress Tenant API",
-    "version": "1.71.0",
+    "version": "1.72.0",
     "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`. Every token-authenticated response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` (epoch seconds); a 429 adds `Retry-After`."
   },
   "servers": [
@@ -8805,6 +8805,7 @@
           "Pages"
         ],
         "summary": "GET /api/pages",
+        "description": "Unpublished pages are returned only to a session or token of a writing role (author, columnist, editor, admin); anyone else, a subscriber or contributor included, gets published pages only (a single unpublished page answers 404).",
         "responses": {
           "200": {
             "description": "OK",
@@ -9237,6 +9238,7 @@
           "Pages"
         ],
         "summary": "GET /api/pages/{id}",
+        "description": "Unpublished pages are returned only to a session or token of a writing role (author, columnist, editor, admin); anyone else, a subscriber or contributor included, gets published pages only (a single unpublished page answers 404).",
         "responses": {
           "200": {
             "description": "OK",
@@ -10004,6 +10006,7 @@
           "Posts"
         ],
         "summary": "GET /api/posts",
+        "description": "Unpublished posts are returned only to a session or token of a writing role (author, columnist, editor, admin); anyone else, a subscriber or contributor included, gets published posts only (a single unpublished post answers 404).",
         "responses": {
           "200": {
             "description": "OK",
@@ -10361,6 +10364,7 @@
           "Posts"
         ],
         "summary": "GET /api/posts/slug/{slug}",
+        "description": "Unpublished posts are returned only to a session or token of a writing role (author, columnist, editor, admin); anyone else, a subscriber or contributor included, gets published posts only (a single unpublished post answers 404).",
         "responses": {
           "200": {
             "description": "OK",
@@ -10621,6 +10625,7 @@
           "Posts"
         ],
         "summary": "GET /api/posts/{id}",
+        "description": "Unpublished posts are returned only to a session or token of a writing role (author, columnist, editor, admin); anyone else, a subscriber or contributor included, gets published posts only (a single unpublished post answers 404).",
         "responses": {
           "200": {
             "description": "OK",
@@ -10838,6 +10843,7 @@
           "Search"
         ],
         "summary": "GET /api/search",
+        "description": "`?private=true` includes unpublished posts and pages and needs a session or token of a writing role (author, columnist, editor, admin): 401 without one, 403 `insufficient_role` for a subscriber or contributor.",
         "responses": {
           "200": {
             "description": "OK",
@@ -10861,6 +10867,9 @@
           },
           "401": {
             "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -10910,6 +10919,7 @@
           "Search"
         ],
         "summary": "GET /api/search/advanced",
+        "description": "`?private=true` includes unpublished posts and pages and needs a session or token of a writing role (author, columnist, editor, admin): 401 without one, 403 `insufficient_role` for a subscriber or contributor.",
         "responses": {
           "200": {
             "description": "OK",
@@ -10933,6 +10943,9 @@
           },
           "401": {
             "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -10946,6 +10959,7 @@
           "Search"
         ],
         "summary": "GET /api/search/hebrew",
+        "description": "`?private=true` includes unpublished posts and pages and needs a session or token of a writing role (author, columnist, editor, admin): 401 without one, 403 `insufficient_role` for a subscriber or contributor.",
         "responses": {
           "200": {
             "description": "OK",
@@ -10969,6 +10983,9 @@
           },
           "401": {
             "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -11101,6 +11118,7 @@
           "Search"
         ],
         "summary": "GET /api/search/suggest",
+        "description": "`?private=true` includes unpublished posts and pages and needs a session or token of a writing role (author, columnist, editor, admin): 401 without one, 403 `insufficient_role` for a subscriber or contributor.",
         "responses": {
           "200": {
             "description": "OK",
@@ -11124,6 +11142,9 @@
           },
           "401": {
             "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -11183,6 +11204,7 @@
           "Sessions"
         ],
         "summary": "GET /api/sessions",
+        "description": "Lists the caller's live browser sessions. Each `id` is an opaque handle for that session (never the session cookie value); pass it to DELETE /api/sessions/{id}.",
         "responses": {
           "200": {
             "description": "OK",
@@ -11269,6 +11291,7 @@
           "Sessions"
         ],
         "summary": "DELETE /api/sessions/{id}",
+        "description": "Revokes one of the caller's own sessions. `id` is the handle GET /api/sessions listed (or `others` for every session but the current one); an unknown handle answers 404.",
         "responses": {
           "200": {
             "description": "Deleted",
@@ -18555,6 +18578,7 @@
           "Users"
         ],
         "summary": "POST /api/users",
+        "description": "Admin only (403 otherwise), whatever the query string says: `self=true` exempts only PUT, which edits the caller's own profile.",
         "responses": {
           "200": {
             "description": "OK",
@@ -18647,6 +18671,7 @@
           "Users"
         ],
         "summary": "DELETE /api/users",
+        "description": "Admin only (403 otherwise), whatever the query string says: `self=true` exempts only PUT, which edits the caller's own profile.",
         "responses": {
           "200": {
             "description": "Deleted",
@@ -24360,7 +24385,7 @@
           "Store"
         ],
         "summary": "POST /api/v1/design/migrate/{id}/apply",
-        "description": "Writes the extracted result: the store's theme, a draft `home` template carrying the playlist blocks, one draft `custom` template per selected imported page (status='draft', is_default=0 - unreachable by any shopper), and `privacy_policy_html` if a privacy page was imported. `shipping_policy_html`/`returns_policy_html` are NEVER written - a shipping/returns page becomes a `/pages/shipping`/`/pages/returns` template instead, with a report line pointing the operator at Settings for a short summary. Every block is validated against its block_type's real schema BEFORE anything is inserted, and the whole write lands in one atomic batch - a single invalid block (or a failed validation) leaves nothing written. `pages` (optional array of paths, from extract's `importedPages`) selects which pages are actually applied; omitted, every imported page is. Write tokens only.",
+        "description": "Writes the extracted result: the store's theme, a draft `home` template carrying the playlist blocks, one draft `custom` template per selected imported page (status='draft', is_default=0 - unreachable by any shopper), and `privacy_policy_html` if a privacy page was imported. The theme and the privacy policy are live store settings (admin only, like PATCH /api/v1/settings): for a non-admin caller (manager, content staff) both are skipped, `theme_written` and `privacy_policy_written` are false and `store_setup_skipped` is `admin_only`; the draft templates are still written. `shipping_policy_html`/`returns_policy_html` are NEVER written - a shipping/returns page becomes a `/pages/shipping`/`/pages/returns` template instead, with a report line pointing the operator at Settings for a short summary. Every block is validated against its block_type's real schema BEFORE anything is inserted, and the whole write lands in one atomic batch - a single invalid block (or a failed validation) leaves nothing written. `pages` (optional array of paths, from extract's `importedPages`) selects which pages are actually applied; omitted, every imported page is. Write tokens only.",
         "security": [
           {
             "bearerAuth": []
@@ -24420,6 +24445,17 @@
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "theme_written": {
+                      "type": "boolean",
+                      "description": "False when the caller is not an admin - the store theme was left as it was."
+                    },
+                    "store_setup_skipped": {
+                      "type": "string",
+                      "enum": [
+                        "admin_only"
+                      ],
+                      "description": "Present only when the theme and privacy policy were skipped because the caller is not an admin."
                     },
                     "privacy_policy_written": {
                       "type": "boolean"
@@ -27517,7 +27553,7 @@
           "Store"
         ],
         "summary": "POST /api/v1/orders/bulk",
-        "description": "Applies one action to many orders rows at once. Every id must belong to THIS store — if ANY id is missing or owned by another store, the WHOLE request is rejected with 400 cross_store_or_missing_ids:<ids> and NOTHING is applied (no partial application of a hostile or stale id list). Idempotent per id — applying the same action twice is a no-op. At most 500 ids per call. mark_shipped sets status=shipped; cancel sets status=cancelled. Served by STORE tenants only; read-only tokens may not POST.",
+        "description": "Applies one action to many orders rows at once. Every id must belong to THIS store — if ANY id is missing or owned by another store, the WHOLE request is rejected with 400 cross_store_or_missing_ids:<ids> and NOTHING is applied (no partial application of a hostile or stale id list). Idempotent per id — applying the same action twice is a no-op. At most 500 ids per call. mark_shipped sets status=shipped (from paid or processing); cancel sets status=cancelled (from pending_payment, paid or processing) and returns the order's stock to the shelf exactly as PATCH /api/v1/orders/{id} does. Every id must be able to make that move under the order lifecycle (or already be in the target status, a no-op) — otherwise the WHOLE request is 409 illegal_transition:<ids> and nothing is applied. Served by STORE tenants only; read-only tokens may not POST.",
         "security": [
           {
             "bearerAuth": []
@@ -27606,6 +27642,27 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "409": {
+            "description": "illegal_transition:<ids> — at least one order cannot make this move (e.g. an unpaid pending_payment order cannot be shipped; a refunded order cannot be cancelled). Nothing is applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           },
           "501": {
             "description": "action: 'export' is accepted but not implemented — no CSV export backend in v1",
@@ -28214,7 +28271,7 @@
           "Store"
         ],
         "summary": "PATCH /api/v1/orders/{orderId}/payments/{paymentId}",
-        "description": "Record that the money for an OFFLINE payment arrived: the payment goes 'received' and the order goes pending_payment → paid. Offline only — a payment made through an online gateway (payplus) is refused with 409 and nothing is written: such a payment is settled solely by the tenant's own server-side verification of the gateway transaction, and its reference holds the gateway's transaction id, which that verification reads. On a charge row it accepts ONLY status: 'received'. The one other operation this endpoint offers is releasing a STRANDED REFUND RESERVATION: a row with kind 'refund' or 'orphan_refund' and status 'pending' (left when a crash or timeout interrupted a refund between reserving and confirming) blocks all further refunds of its own balance on the order until an operator, having checked the provider's dashboard, resolves it — status 'failed' records that the money never moved (the reservation is released and the refundable balance returns; a reference is refused, there is nothing to reference), or status 'received' with the provider's own REFUND reference (required) records that it did move. Only a pending refund or orphan_refund row can be released (anything else is a 409), a reference already recorded on another payment is a 409 (the usual mistake is pasting the charge's transaction uid instead of the refund's), and the release never moves the ORDER's status — once confirmed refunds cover the capture, PATCH /api/v1/orders/{id} marks the order refunded and restocks. An orphan payment (kind 'orphan') is never mutated here: its money is refunded, or its out-of-band return recorded, through POST /api/v1/orders/{orderId}/refunds with payment_id, which writes an orphan_refund row and leaves the orphan row 'received' as the durable record of what arrived; status 'refunded' is a 400 on every row. Other ORDER status transitions are made with PATCH /api/v1/orders/{id}, but this call remains the only route to paid. Idempotent: repeating the call returns 200, and an order that has already moved past pending_payment (e.g. shipped) is never dragged back to paid — only the payment row updates. Recording receipt on a cancelled or refunded order is a 409 — the money already left, and a received payment on a dead order would be a silent contradiction; recording receipt on an online gateway payment is a 409 whatever the order's status. An unknown body field is rejected with 400 unknown_field:<name>, never silently ignored, and a reference over 200 characters is a 400, never truncated. The payment must belong to the order in the URL and to this store; any mismatch, unknown id or malformed id is a plain 404. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "description": "Record that the money for an OFFLINE payment arrived: the payment goes 'received' and the order goes pending_payment → paid. Offline only — a payment made through an online gateway (payplus) is refused with 409 and nothing is written: such a payment is settled solely by the tenant's own server-side verification of the gateway transaction, and its reference holds the gateway's transaction id, which that verification reads. On a charge row it accepts ONLY status: 'received'. The one other operation this endpoint offers is releasing a STRANDED REFUND RESERVATION: a row with kind 'refund' or 'orphan_refund' and status 'pending' (left when a crash or timeout interrupted a refund between reserving and confirming) blocks all further refunds of its own balance on the order until an operator, having checked the provider's dashboard, resolves it — status 'failed' records that the money never moved (the reservation is released and the refundable balance returns; a reference is refused, there is nothing to reference), or status 'received' with the provider's own REFUND reference (required) records that it did move. Only a pending refund or orphan_refund row can be released (anything else is a 409), a reference already recorded on another payment is a 409 (the usual mistake is pasting the charge's transaction uid instead of the refund's), and the release never moves the ORDER's status — once confirmed refunds cover the capture, PATCH /api/v1/orders/{id} marks the order refunded and restocks. An orphan payment (kind 'orphan') is never mutated here: its money is refunded, or its out-of-band return recorded, through POST /api/v1/orders/{orderId}/refunds with payment_id, which writes an orphan_refund row and leaves the orphan row 'received' as the durable record of what arrived; status 'refunded' is a 400 on every row. Other ORDER status transitions are made with PATCH /api/v1/orders/{id}, but this call remains the only route to paid. Idempotent: repeating the call returns 200, and an order that has already moved past pending_payment (e.g. shipped) is never dragged back to paid — only the payment row updates. Recording receipt on a payment that is not pending or received (failed, reverted, refunded) is a 409, and so is a partial receipt (amount below the row's) on a payment that is already received — only a pending payment can be split. Recording receipt on a cancelled or refunded order is a 409 — the money already left, and a received payment on a dead order would be a silent contradiction; recording receipt on an online gateway payment is a 409 whatever the order's status. An unknown body field is rejected with 400 unknown_field:<name>, never silently ignored, and a reference over 200 characters is a 400, never truncated. The payment must belong to the order in the URL and to this store; any mismatch, unknown id or malformed id is a plain 404. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
         "security": [
           {
             "bearerAuth": []
@@ -28323,7 +28380,7 @@
             }
           },
           "409": {
-            "description": "Receipt cannot be recorded: the order is cancelled or refunded (the money already left), or the payment was made through an online gateway (payplus) and is settled only by the tenant's server-side verification of the gateway transaction, never by hand, the refund row addressed is not a pending reservation (already resolved — settled money records do not flip), or the reference is already recorded on another payment (enter the refund's own uid, not the charge's)",
+            "description": "Receipt cannot be recorded: the payment is in a terminal state (failed/reverted/refunded), a partial receipt names an already-received payment, the order is cancelled or refunded (the money already left), or the payment was made through an online gateway (payplus) and is settled only by the tenant's server-side verification of the gateway transaction, never by hand, the refund row addressed is not a pending reservation (already resolved — settled money records do not flip), or the reference is already recorded on another payment (enter the refund's own uid, not the charge's)",
             "content": {
               "application/json": {
                 "schema": {
@@ -39591,7 +39648,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "Refused as a whole, nothing applied: delete names a default+published template (cannot_delete_default_published) or the layout (cannot_delete_layout); unpublish names the layout (layout_cannot_be_unpublished, with a message)",
+            "description": "Refused as a whole, nothing applied: delete names a type default (cannot_delete_default_published when it is published, cannot_delete_default otherwise) or the layout (cannot_delete_layout); unpublish names a type default (cannot_unpublish_default) or the layout (layout_cannot_be_unpublished, with a message)",
             "content": {
               "application/json": {
                 "schema": {
