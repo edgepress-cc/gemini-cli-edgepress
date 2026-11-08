@@ -201,6 +201,8 @@ Triggers per domain:
 - Anything about tokens/auth → `references/api-tokens.md`
 - Building or editing page layouts — templates, zones, block instances →
   `references/templates.md`
+- Writing a plugin (manifest + bundle: events, public routes, schedules) →
+  `references/plugins.md`
 
 Simple GETs (list posts, show a page, read settings) don't need a reference
 load — use the quick reference and go.
@@ -500,6 +502,22 @@ Same paths, same envelope and same rules on a store tenant (`ep` already
 prefixes `/api/v1`). You can audit tokens but never mint or revoke them.
 Refer the user to `https://<tenant>/admin/settings/api-tokens` — the same
 URL on both products.
+
+### Plugins — BOTH products
+
+Plugins are managed only from the admin, by an admin who signed in within the
+last 10 minutes (`/api/v1/plugins`: upload, approve, settings, secrets,
+disable/enable, rollback, logs, uninstall). Every call with a token is refused
+(403 `session_required` for a PAT), so **an agent cannot install, approve,
+configure or remove a plugin, or read its secrets list**. Tell the user to do it
+in the admin. A plugin's own token reaches only the routes its approved scopes
+allow, and never `/api/v1/plugins` or `/api/v1/api-tokens`.
+
+You CAN write one: a JSON manifest plus a single ES module
+(`export default { onEvent(event, env), onRequest(request, env), onSchedule(name, env) }`,
+no imports, ≤ 1 MB) that calls `env.api`, `env.storage`, `env.log`, `env.settings`
+and `fetch` to declared hosts only. Read `references/plugins.md` before writing
+one, then hand the user both files for Settings → Plugins.
 
 ### Audit log — STORE
 
@@ -1710,6 +1728,7 @@ Load one of these before generating code for its domain:
 | Settings | `references/settings.md` | key-value store, public_signup_enabled, site_title |
 | API tokens | `references/api-tokens.md` | list works via PAT; POST/DELETE need session — refer to admin UI |
 | Templates | `references/templates.md` | page layouts via `POST /graphql`: templates, zones, block instances, publish, assignment |
+| Plugins | `references/plugins.md` | writing a plugin: manifest, scopes, events, `env.*`, secrets, limits; install is admin-UI only |
 
 ## Session output style
 

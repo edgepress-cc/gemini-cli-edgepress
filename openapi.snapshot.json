@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgePress Tenant API",
-    "version": "1.74.0",
+    "version": "1.79.0",
     "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`. Every token-authenticated response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` (epoch seconds); a 429 adds `Retry-After`."
   },
   "servers": [
@@ -42,6 +42,101 @@
       }
     },
     "schemas": {
+      "PluginInstall": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled",
+              "disabled_errors",
+              "paused_budget"
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "egress": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hooks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cron": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pending": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "sha": {
+                "type": "string",
+                "description": "Upload id: SHA-256 of the bundle code and its validated manifest together (the same code under a wider manifest is a new sha); POST approve with it."
+              },
+              "widened": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "secrets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "set": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "settings": {
+            "type": "object"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Kept versions, newest first (rollback targets)."
+          }
+        }
+      },
       "Post": {
         "type": "object",
         "required": [
@@ -5947,6 +6042,854 @@
     }
   },
   "paths": {
+    "/api/plugins": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "GET /api/plugins",
+        "description": "List installed plugins with their grant, pending update (and what it adds), secrets (names and whether set, never values), settings and kept versions. Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "plugins": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PluginInstall"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "POST /api/plugins",
+        "description": "Upload a plugin: multipart with `manifest` (JSON text) and `bundle` (one self-contained ES module, at most 1,048,576 bytes, no import/export-from/import()). A new slug, or an update that asks for more than the approved grant (`widened`), waits for approve (approve it with the returned `sha`); an update within the grant applies at once and the previous version is kept (last 5). Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "manifest",
+                  "bundle"
+                ],
+                "properties": {
+                  "manifest": {
+                    "type": "string"
+                  },
+                  "bundle": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slug": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "sha": {
+                      "type": "string",
+                      "description": "Upload id: SHA-256 of the bundle code and its validated manifest together; the value approve takes when `needs_consent`."
+                    },
+                    "needs_consent": {
+                      "type": "boolean"
+                    },
+                    "widened": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bundle_too_large | bundle_required | manifest_required | imports_not_allowed | invalid_multipart | invalid_manifest:<reason>",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "411": {
+            "description": "length_required: the upload had no Content-Length (a chunked body is refused before it is read)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugins/{path}": {
+      "parameters": [
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "`<slug>`, `<slug>/approve|discard|disable|enable|rollback|settings|logs`, or `<slug>/secrets/<NAME>`."
+        }
+      ],
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "GET /api/plugins/{path}",
+        "description": "`<slug>/logs`: `{ logs: [{ts, level, msg}] }`, the newest 100 lines from the plugin host. Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "ts": {
+                            "type": "integer"
+                          },
+                          "level": {
+                            "type": "string"
+                          },
+                          "msg": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "POST /api/plugins/{path}",
+        "description": "`<slug>/approve` `{sha}` — `pending.sha` from the list, binding the approval to the exact upload reviewed (400 `sha_required` without it; 409 `nothing_pending`; 409 `pending_changed`, with the current `pending` {version, sha}, when another upload or rollback replaced it, also if that lands while the approval is being written — nothing is applied or minted then): applies the pending upload, mints the plugin token with the manifest's scopes, status `active`, registers the site with the plugin host (`registered`); on a plugin an admin disabled it applies the version and grant but stays `disabled` (no token; enable turns it on), while one auto-disabled for errors comes back `active`. `<slug>/discard`: drops the pending upload (409 `nothing_pending`); on a plugin that was never approved it uninstalls it. `<slug>/disable`: status `disabled`, the token is revoked. `<slug>/enable`: a new token, status `active` (409 `needs_consent` if never approved). `<slug>/rollback` `{version}`: restores a kept version (404 `version_not_kept`); if its manifest asks for more than the grant it waits for approve (`needs_consent`, with the `sha` to approve). Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sha": {
+                    "type": "string",
+                    "description": "approve: `pending.sha` from the list (required)."
+                  },
+                  "version": {
+                    "type": "string",
+                    "description": "rollback: the kept version to restore."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "sha_required (approve without `sha`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "nothing_pending | pending_changed (body carries the current `pending` {version, sha}) | needs_consent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "plugins_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "PUT /api/plugins/{path}",
+        "description": "`<slug>/settings` `{settings}`: a JSON object, at most 16 KB (400 `invalid_settings`, `settings_too_large`). `<slug>/secrets/<NAME>` `{value}`: stored encrypted and write-only; NAME must be declared by the manifest (400 `unknown_secret`), value at most 4 KB (400 `secret_too_large`); answers `{name, set: true}`. Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "settings": {
+                    "type": "object"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "DELETE /api/plugins/{path}",
+        "description": "`<slug>`: uninstall — revokes the token and deletes the install, its storage, its secrets and its bundles at once (no retention period). `<slug>/secrets/<NAME>`: clears that secret, `{name, set: false}`. Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plugins": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "GET /api/v1/plugins",
+        "description": "List installed plugins with their grant, pending update (and what it adds), secrets (names and whether set, never values), settings and kept versions. Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "plugins": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PluginInstall"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "POST /api/v1/plugins",
+        "description": "Upload a plugin: multipart with `manifest` (JSON text) and `bundle` (one self-contained ES module, at most 1,048,576 bytes, no import/export-from/import()). A new slug, or an update that asks for more than the approved grant (`widened`), waits for approve (approve it with the returned `sha`); an update within the grant applies at once and the previous version is kept (last 5). Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "manifest",
+                  "bundle"
+                ],
+                "properties": {
+                  "manifest": {
+                    "type": "string"
+                  },
+                  "bundle": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slug": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "sha": {
+                      "type": "string",
+                      "description": "Upload id: SHA-256 of the bundle code and its validated manifest together; the value approve takes when `needs_consent`."
+                    },
+                    "needs_consent": {
+                      "type": "boolean"
+                    },
+                    "widened": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bundle_too_large | bundle_required | manifest_required | imports_not_allowed | invalid_multipart | invalid_manifest:<reason>",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "411": {
+            "description": "length_required: the upload had no Content-Length (a chunked body is refused before it is read)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plugins/{path}": {
+      "parameters": [
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "`<slug>`, `<slug>/approve|discard|disable|enable|rollback|settings|logs`, or `<slug>/secrets/<NAME>`."
+        }
+      ],
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "GET /api/v1/plugins/{path}",
+        "description": "`<slug>/logs`: `{ logs: [{ts, level, msg}] }`, the newest 100 lines from the plugin host. Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "ts": {
+                            "type": "integer"
+                          },
+                          "level": {
+                            "type": "string"
+                          },
+                          "msg": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "POST /api/v1/plugins/{path}",
+        "description": "`<slug>/approve` `{sha}` — `pending.sha` from the list, binding the approval to the exact upload reviewed (400 `sha_required` without it; 409 `nothing_pending`; 409 `pending_changed`, with the current `pending` {version, sha}, when another upload or rollback replaced it, also if that lands while the approval is being written — nothing is applied or minted then): applies the pending upload, mints the plugin token with the manifest's scopes, status `active`, registers the site with the plugin host (`registered`); on a plugin an admin disabled it applies the version and grant but stays `disabled` (no token; enable turns it on), while one auto-disabled for errors comes back `active`. `<slug>/discard`: drops the pending upload (409 `nothing_pending`); on a plugin that was never approved it uninstalls it. `<slug>/disable`: status `disabled`, the token is revoked. `<slug>/enable`: a new token, status `active` (409 `needs_consent` if never approved). `<slug>/rollback` `{version}`: restores a kept version (404 `version_not_kept`); if its manifest asks for more than the grant it waits for approve (`needs_consent`, with the `sha` to approve). Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sha": {
+                    "type": "string",
+                    "description": "approve: `pending.sha` from the list (required)."
+                  },
+                  "version": {
+                    "type": "string",
+                    "description": "rollback: the kept version to restore."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "sha_required (approve without `sha`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "nothing_pending | pending_changed (body carries the current `pending` {version, sha}) | needs_consent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "plugins_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "PUT /api/v1/plugins/{path}",
+        "description": "`<slug>/settings` `{settings}`: a JSON object, at most 16 KB (400 `invalid_settings`, `settings_too_large`). `<slug>/secrets/<NAME>` `{value}`: stored encrypted and write-only; NAME must be declared by the manifest (400 `unknown_secret`), value at most 4 KB (400 `secret_too_large`); answers `{name, set: true}`. Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "settings": {
+                    "type": "object"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "DELETE /api/v1/plugins/{path}",
+        "description": "`<slug>`: uninstall — revokes the token and deletes the install, its storage, its secrets and its bundles at once (no retention period). `<slug>/secrets/<NAME>`: clears that secret, `{name, set: false}`. Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin": {
       "get": {
         "tags": [
@@ -46105,6 +47048,1038 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/plugin-storage": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "GET /api/plugin-storage",
+        "description": "Per-install key-value storage for a plugin, in the site's database. Callable only with that plugin's token (any scopes): every other caller (session, personal access token) gets 403 `plugin_token_required`. One install can never see another's keys. Keys are `[a-z0-9_.-]`, 1-128 characters (else 400 `invalid_key`); a value is a string of at most 262,144 UTF-8 bytes (else 400 `invalid_value`; a request body over 300,000 bytes is 413 `value_too_large`); at most 10,000 keys and 10,485,760 characters in total per install (else 413 `storage_full`; the total is counted in characters). 503 `plugin_storage_unavailable` while the site is mid-upgrade. Lists the install's keys (at most 10,000).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugin-storage/{key}": {
+      "parameters": [
+        {
+          "name": "key",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[a-z0-9_.-]{1,128}$"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "GET /api/plugin-storage/{key}",
+        "description": "Per-install key-value storage for a plugin, in the site's database. Callable only with that plugin's token (any scopes): every other caller (session, personal access token) gets 403 `plugin_token_required`. One install can never see another's keys. Keys are `[a-z0-9_.-]`, 1-128 characters (else 400 `invalid_key`); a value is a string of at most 262,144 UTF-8 bytes (else 400 `invalid_value`; a request body over 300,000 bytes is 413 `value_too_large`); at most 10,000 keys and 10,485,760 characters in total per install (else 413 `storage_full`; the total is counted in characters). 503 `plugin_storage_unavailable` while the site is mid-upgrade. Reads one value; 404 when the key is not set.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "PUT /api/plugin-storage/{key}",
+        "description": "Per-install key-value storage for a plugin, in the site's database. Callable only with that plugin's token (any scopes): every other caller (session, personal access token) gets 403 `plugin_token_required`. One install can never see another's keys. Keys are `[a-z0-9_.-]`, 1-128 characters (else 400 `invalid_key`); a value is a string of at most 262,144 UTF-8 bytes (else 400 `invalid_value`; a request body over 300,000 bytes is 413 `value_too_large`); at most 10,000 keys and 10,485,760 characters in total per install (else 413 `storage_full`; the total is counted in characters). 503 `plugin_storage_unavailable` while the site is mid-upgrade. Sets one value, replacing any earlier one.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "DELETE /api/plugin-storage/{key}",
+        "description": "Per-install key-value storage for a plugin, in the site's database. Callable only with that plugin's token (any scopes): every other caller (session, personal access token) gets 403 `plugin_token_required`. One install can never see another's keys. Keys are `[a-z0-9_.-]`, 1-128 characters (else 400 `invalid_key`); a value is a string of at most 262,144 UTF-8 bytes (else 400 `invalid_value`; a request body over 300,000 bytes is 413 `value_too_large`); at most 10,000 keys and 10,485,760 characters in total per install (else 413 `storage_full`; the total is counted in characters). 503 `plugin_storage_unavailable` while the site is mid-upgrade. Deletes one key (200 even when it was not set).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plugin-storage": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "GET /api/v1/plugin-storage",
+        "description": "Per-install key-value storage for a plugin, in the site's database. Callable only with that plugin's token (any scopes): every other caller (session, personal access token) gets 403 `plugin_token_required`. One install can never see another's keys. Keys are `[a-z0-9_.-]`, 1-128 characters (else 400 `invalid_key`); a value is a string of at most 262,144 UTF-8 bytes (else 400 `invalid_value`; a request body over 300,000 bytes is 413 `value_too_large`); at most 10,000 keys and 10,485,760 characters in total per install (else 413 `storage_full`; the total is counted in characters). 503 `plugin_storage_unavailable` while the site is mid-upgrade. Lists the install's keys (at most 10,000).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plugin-storage/{key}": {
+      "parameters": [
+        {
+          "name": "key",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[a-z0-9_.-]{1,128}$"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "GET /api/v1/plugin-storage/{key}",
+        "description": "Per-install key-value storage for a plugin, in the site's database. Callable only with that plugin's token (any scopes): every other caller (session, personal access token) gets 403 `plugin_token_required`. One install can never see another's keys. Keys are `[a-z0-9_.-]`, 1-128 characters (else 400 `invalid_key`); a value is a string of at most 262,144 UTF-8 bytes (else 400 `invalid_value`; a request body over 300,000 bytes is 413 `value_too_large`); at most 10,000 keys and 10,485,760 characters in total per install (else 413 `storage_full`; the total is counted in characters). 503 `plugin_storage_unavailable` while the site is mid-upgrade. Reads one value; 404 when the key is not set.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "PUT /api/v1/plugin-storage/{key}",
+        "description": "Per-install key-value storage for a plugin, in the site's database. Callable only with that plugin's token (any scopes): every other caller (session, personal access token) gets 403 `plugin_token_required`. One install can never see another's keys. Keys are `[a-z0-9_.-]`, 1-128 characters (else 400 `invalid_key`); a value is a string of at most 262,144 UTF-8 bytes (else 400 `invalid_value`; a request body over 300,000 bytes is 413 `value_too_large`); at most 10,000 keys and 10,485,760 characters in total per install (else 413 `storage_full`; the total is counted in characters). 503 `plugin_storage_unavailable` while the site is mid-upgrade. Sets one value, replacing any earlier one.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "DELETE /api/v1/plugin-storage/{key}",
+        "description": "Per-install key-value storage for a plugin, in the site's database. Callable only with that plugin's token (any scopes): every other caller (session, personal access token) gets 403 `plugin_token_required`. One install can never see another's keys. Keys are `[a-z0-9_.-]`, 1-128 characters (else 400 `invalid_key`); a value is a string of at most 262,144 UTF-8 bytes (else 400 `invalid_value`; a request body over 300,000 bytes is 413 `value_too_large`); at most 10,000 keys and 10,485,760 characters in total per install (else 413 `storage_full`; the total is counted in characters). 503 `plugin_storage_unavailable` while the site is mid-upgrade. Deletes one key (200 even when it was not set).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plugin-routes/{slug}/{route}": {
+      "parameters": [
+        {
+          "name": "slug",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "route",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "GET /api/plugin-routes/{slug}/{route}",
+        "description": "Anonymous plugin endpoints, for incoming webhooks (no session, no token). `<slug>` is an installed, active plugin and `<route>` must be listed in its manifest `routes`, else 404 `not_found`. Any method; the query string and any further path are passed on. The request body is capped at 1,048,576 bytes (413 `body_too_large`); `Cookie`, `Authorization`, `X-EP-*`, `CF-*` and `X-Forwarded-*` headers are not forwarded, all others (e.g. signature headers) are. 60 requests per minute per IP per plugin (429 `rate_limited`). The plugin's status must be 200-599 (else 502 `bad_plugin_response`); its answer is served as `application/json` when it says so, otherwise as `text/plain; charset=utf-8`, never HTML. Every response carries exactly `Content-Type`, `Content-Security-Policy: sandbox; default-src 'none'`, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; a plugin cannot set cookies or any other header. 429 `plugin_budget` when the plugin is over its run budget; 503 `plugin_unavailable` when it cannot answer. Open while the site is in maintenance mode.",
+        "responses": {
+          "200": {
+            "description": "The plugin's answer (any status 200-599)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown plugin or route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Plugin unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "POST /api/plugin-routes/{slug}/{route}",
+        "description": "Anonymous plugin endpoints, for incoming webhooks (no session, no token). `<slug>` is an installed, active plugin and `<route>` must be listed in its manifest `routes`, else 404 `not_found`. Any method; the query string and any further path are passed on. The request body is capped at 1,048,576 bytes (413 `body_too_large`); `Cookie`, `Authorization`, `X-EP-*`, `CF-*` and `X-Forwarded-*` headers are not forwarded, all others (e.g. signature headers) are. 60 requests per minute per IP per plugin (429 `rate_limited`). The plugin's status must be 200-599 (else 502 `bad_plugin_response`); its answer is served as `application/json` when it says so, otherwise as `text/plain; charset=utf-8`, never HTML. Every response carries exactly `Content-Type`, `Content-Security-Policy: sandbox; default-src 'none'`, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; a plugin cannot set cookies or any other header. 429 `plugin_budget` when the plugin is over its run budget; 503 `plugin_unavailable` when it cannot answer. Open while the site is in maintenance mode.",
+        "responses": {
+          "200": {
+            "description": "The plugin's answer (any status 200-599)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown plugin or route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Plugin unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "PUT /api/plugin-routes/{slug}/{route}",
+        "description": "Anonymous plugin endpoints, for incoming webhooks (no session, no token). `<slug>` is an installed, active plugin and `<route>` must be listed in its manifest `routes`, else 404 `not_found`. Any method; the query string and any further path are passed on. The request body is capped at 1,048,576 bytes (413 `body_too_large`); `Cookie`, `Authorization`, `X-EP-*`, `CF-*` and `X-Forwarded-*` headers are not forwarded, all others (e.g. signature headers) are. 60 requests per minute per IP per plugin (429 `rate_limited`). The plugin's status must be 200-599 (else 502 `bad_plugin_response`); its answer is served as `application/json` when it says so, otherwise as `text/plain; charset=utf-8`, never HTML. Every response carries exactly `Content-Type`, `Content-Security-Policy: sandbox; default-src 'none'`, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; a plugin cannot set cookies or any other header. 429 `plugin_budget` when the plugin is over its run budget; 503 `plugin_unavailable` when it cannot answer. Open while the site is in maintenance mode.",
+        "responses": {
+          "200": {
+            "description": "The plugin's answer (any status 200-599)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown plugin or route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Plugin unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "PATCH /api/plugin-routes/{slug}/{route}",
+        "description": "Anonymous plugin endpoints, for incoming webhooks (no session, no token). `<slug>` is an installed, active plugin and `<route>` must be listed in its manifest `routes`, else 404 `not_found`. Any method; the query string and any further path are passed on. The request body is capped at 1,048,576 bytes (413 `body_too_large`); `Cookie`, `Authorization`, `X-EP-*`, `CF-*` and `X-Forwarded-*` headers are not forwarded, all others (e.g. signature headers) are. 60 requests per minute per IP per plugin (429 `rate_limited`). The plugin's status must be 200-599 (else 502 `bad_plugin_response`); its answer is served as `application/json` when it says so, otherwise as `text/plain; charset=utf-8`, never HTML. Every response carries exactly `Content-Type`, `Content-Security-Policy: sandbox; default-src 'none'`, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; a plugin cannot set cookies or any other header. 429 `plugin_budget` when the plugin is over its run budget; 503 `plugin_unavailable` when it cannot answer. Open while the site is in maintenance mode.",
+        "responses": {
+          "200": {
+            "description": "The plugin's answer (any status 200-599)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown plugin or route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Plugin unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "DELETE /api/plugin-routes/{slug}/{route}",
+        "description": "Anonymous plugin endpoints, for incoming webhooks (no session, no token). `<slug>` is an installed, active plugin and `<route>` must be listed in its manifest `routes`, else 404 `not_found`. Any method; the query string and any further path are passed on. The request body is capped at 1,048,576 bytes (413 `body_too_large`); `Cookie`, `Authorization`, `X-EP-*`, `CF-*` and `X-Forwarded-*` headers are not forwarded, all others (e.g. signature headers) are. 60 requests per minute per IP per plugin (429 `rate_limited`). The plugin's status must be 200-599 (else 502 `bad_plugin_response`); its answer is served as `application/json` when it says so, otherwise as `text/plain; charset=utf-8`, never HTML. Every response carries exactly `Content-Type`, `Content-Security-Policy: sandbox; default-src 'none'`, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; a plugin cannot set cookies or any other header. 429 `plugin_budget` when the plugin is over its run budget; 503 `plugin_unavailable` when it cannot answer. Open while the site is in maintenance mode.",
+        "responses": {
+          "200": {
+            "description": "The plugin's answer (any status 200-599)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown plugin or route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Plugin unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plugin-routes/{slug}/{route}": {
+      "parameters": [
+        {
+          "name": "slug",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "route",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "GET /api/v1/plugin-routes/{slug}/{route}",
+        "description": "Anonymous plugin endpoints, for incoming webhooks (no session, no token). `<slug>` is an installed, active plugin and `<route>` must be listed in its manifest `routes`, else 404 `not_found`. Any method; the query string and any further path are passed on. The request body is capped at 1,048,576 bytes (413 `body_too_large`); `Cookie`, `Authorization`, `X-EP-*`, `CF-*` and `X-Forwarded-*` headers are not forwarded, all others (e.g. signature headers) are. 60 requests per minute per IP per plugin (429 `rate_limited`). The plugin's status must be 200-599 (else 502 `bad_plugin_response`); its answer is served as `application/json` when it says so, otherwise as `text/plain; charset=utf-8`, never HTML. Every response carries exactly `Content-Type`, `Content-Security-Policy: sandbox; default-src 'none'`, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; a plugin cannot set cookies or any other header. 429 `plugin_budget` when the plugin is over its run budget; 503 `plugin_unavailable` when it cannot answer. Open while the site is in maintenance mode.",
+        "responses": {
+          "200": {
+            "description": "The plugin's answer (any status 200-599)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown plugin or route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Plugin unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "POST /api/v1/plugin-routes/{slug}/{route}",
+        "description": "Anonymous plugin endpoints, for incoming webhooks (no session, no token). `<slug>` is an installed, active plugin and `<route>` must be listed in its manifest `routes`, else 404 `not_found`. Any method; the query string and any further path are passed on. The request body is capped at 1,048,576 bytes (413 `body_too_large`); `Cookie`, `Authorization`, `X-EP-*`, `CF-*` and `X-Forwarded-*` headers are not forwarded, all others (e.g. signature headers) are. 60 requests per minute per IP per plugin (429 `rate_limited`). The plugin's status must be 200-599 (else 502 `bad_plugin_response`); its answer is served as `application/json` when it says so, otherwise as `text/plain; charset=utf-8`, never HTML. Every response carries exactly `Content-Type`, `Content-Security-Policy: sandbox; default-src 'none'`, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; a plugin cannot set cookies or any other header. 429 `plugin_budget` when the plugin is over its run budget; 503 `plugin_unavailable` when it cannot answer. Open while the site is in maintenance mode.",
+        "responses": {
+          "200": {
+            "description": "The plugin's answer (any status 200-599)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown plugin or route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Plugin unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "PUT /api/v1/plugin-routes/{slug}/{route}",
+        "description": "Anonymous plugin endpoints, for incoming webhooks (no session, no token). `<slug>` is an installed, active plugin and `<route>` must be listed in its manifest `routes`, else 404 `not_found`. Any method; the query string and any further path are passed on. The request body is capped at 1,048,576 bytes (413 `body_too_large`); `Cookie`, `Authorization`, `X-EP-*`, `CF-*` and `X-Forwarded-*` headers are not forwarded, all others (e.g. signature headers) are. 60 requests per minute per IP per plugin (429 `rate_limited`). The plugin's status must be 200-599 (else 502 `bad_plugin_response`); its answer is served as `application/json` when it says so, otherwise as `text/plain; charset=utf-8`, never HTML. Every response carries exactly `Content-Type`, `Content-Security-Policy: sandbox; default-src 'none'`, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; a plugin cannot set cookies or any other header. 429 `plugin_budget` when the plugin is over its run budget; 503 `plugin_unavailable` when it cannot answer. Open while the site is in maintenance mode.",
+        "responses": {
+          "200": {
+            "description": "The plugin's answer (any status 200-599)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown plugin or route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Plugin unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "PATCH /api/v1/plugin-routes/{slug}/{route}",
+        "description": "Anonymous plugin endpoints, for incoming webhooks (no session, no token). `<slug>` is an installed, active plugin and `<route>` must be listed in its manifest `routes`, else 404 `not_found`. Any method; the query string and any further path are passed on. The request body is capped at 1,048,576 bytes (413 `body_too_large`); `Cookie`, `Authorization`, `X-EP-*`, `CF-*` and `X-Forwarded-*` headers are not forwarded, all others (e.g. signature headers) are. 60 requests per minute per IP per plugin (429 `rate_limited`). The plugin's status must be 200-599 (else 502 `bad_plugin_response`); its answer is served as `application/json` when it says so, otherwise as `text/plain; charset=utf-8`, never HTML. Every response carries exactly `Content-Type`, `Content-Security-Policy: sandbox; default-src 'none'`, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; a plugin cannot set cookies or any other header. 429 `plugin_budget` when the plugin is over its run budget; 503 `plugin_unavailable` when it cannot answer. Open while the site is in maintenance mode.",
+        "responses": {
+          "200": {
+            "description": "The plugin's answer (any status 200-599)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown plugin or route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Plugin unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "DELETE /api/v1/plugin-routes/{slug}/{route}",
+        "description": "Anonymous plugin endpoints, for incoming webhooks (no session, no token). `<slug>` is an installed, active plugin and `<route>` must be listed in its manifest `routes`, else 404 `not_found`. Any method; the query string and any further path are passed on. The request body is capped at 1,048,576 bytes (413 `body_too_large`); `Cookie`, `Authorization`, `X-EP-*`, `CF-*` and `X-Forwarded-*` headers are not forwarded, all others (e.g. signature headers) are. 60 requests per minute per IP per plugin (429 `rate_limited`). The plugin's status must be 200-599 (else 502 `bad_plugin_response`); its answer is served as `application/json` when it says so, otherwise as `text/plain; charset=utf-8`, never HTML. Every response carries exactly `Content-Type`, `Content-Security-Policy: sandbox; default-src 'none'`, `X-Content-Type-Options: nosniff`, `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; a plugin cannot set cookies or any other header. 429 `plugin_budget` when the plugin is over its run budget; 503 `plugin_unavailable` when it cannot answer. Open while the site is in maintenance mode.",
+        "responses": {
+          "200": {
+            "description": "The plugin's answer (any status 200-599)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown plugin or route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "description": "Plugin unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
