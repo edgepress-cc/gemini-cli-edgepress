@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgePress Tenant API",
-    "version": "1.79.0",
+    "version": "1.80.0",
     "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`. Every token-authenticated response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` (epoch seconds); a 429 adds `Retry-After`."
   },
   "servers": [
@@ -6042,6 +6042,76 @@
     }
   },
   "paths": {
+    "/api/plugin-blocks/preview": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "POST /api/plugin-blocks/preview",
+        "description": "Render a plugin block for the editor now and store the rendering, so the page shows it on the first view after save. Body `{type: \"plugin.<slug>.<block>\", props}`. 200 `{html, css, error}`: `html`/`css` are null when the block has never rendered, `error` is the last failure or null. 400 `invalid_type`, `invalid_props:<prop>:<rule>`, `too_many_variations`; 404 `not_installed` (no active install with that block) or `unknown_block`; 503 `schema_upgrade_pending` while the site's upgrade is still adding the block tables. Session only: an editor or admin (store: the content area). PATs and plugin tokens get 403 `session_required`; others 403 `insufficient_role`. Every response is `Cache-Control: no-store`. CMS: /api/plugin-blocks/preview (and its /api/v1 mirror). Store: /api/v1/plugin-blocks/preview only.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "Block type, `plugin.<slug>.<block>`."
+                  },
+                  "props": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "html": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "css": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "error": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_type | invalid_props:<prop>:<rule> | too_many_variations"
+          },
+          "403": {
+            "description": "session_required | insufficient_role"
+          },
+          "404": {
+            "description": "not_installed | unknown_block"
+          },
+          "503": {
+            "description": "schema_upgrade_pending (the site is mid-upgrade; retry shortly)"
+          }
+        }
+      }
+    },
     "/api/plugins": {
       "get": {
         "tags": [
@@ -6088,7 +6158,7 @@
           "Plugins"
         ],
         "summary": "POST /api/plugins",
-        "description": "Upload a plugin: multipart with `manifest` (JSON text) and `bundle` (one self-contained ES module, at most 1,048,576 bytes, no import/export-from/import()). A new slug, or an update that asks for more than the approved grant (`widened`), waits for approve (approve it with the returned `sha`); an update within the grant applies at once and the previous version is kept (last 5). Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "description": "Upload a plugin: multipart with `manifest` (JSON text) and `bundle` (one self-contained ES module, at most 1,048,576 bytes, no import/export-from/import()). The manifest may declare `blocks` (at most 10: `{slug, title, props, required}`) that become page-builder blocks of type `plugin.<slug>.<block>`; see the edgepress skill. A new slug, or an update that asks for more than the approved grant (`widened`), waits for approve (approve it with the returned `sha`); an update within the grant applies at once and the previous version is kept (last 5). Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6466,6 +6536,76 @@
         }
       }
     },
+    "/api/v1/plugin-blocks/preview": {
+      "post": {
+        "tags": [
+          "Plugins"
+        ],
+        "summary": "POST /api/v1/plugin-blocks/preview",
+        "description": "Render a plugin block for the editor now and store the rendering, so the page shows it on the first view after save. Body `{type: \"plugin.<slug>.<block>\", props}`. 200 `{html, css, error}`: `html`/`css` are null when the block has never rendered, `error` is the last failure or null. 400 `invalid_type`, `invalid_props:<prop>:<rule>`, `too_many_variations`; 404 `not_installed` (no active install with that block) or `unknown_block`; 503 `schema_upgrade_pending` while the site's upgrade is still adding the block tables. Session only: an editor or admin (store: the content area). PATs and plugin tokens get 403 `session_required`; others 403 `insufficient_role`. Every response is `Cache-Control: no-store`. CMS: /api/plugin-blocks/preview (and its /api/v1 mirror). Store: /api/v1/plugin-blocks/preview only.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "Block type, `plugin.<slug>.<block>`."
+                  },
+                  "props": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "html": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "css": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "error": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_type | invalid_props:<prop>:<rule> | too_many_variations"
+          },
+          "403": {
+            "description": "session_required | insufficient_role"
+          },
+          "404": {
+            "description": "not_installed | unknown_block"
+          },
+          "503": {
+            "description": "schema_upgrade_pending (the site is mid-upgrade; retry shortly)"
+          }
+        }
+      }
+    },
     "/api/v1/plugins": {
       "get": {
         "tags": [
@@ -6512,7 +6652,7 @@
           "Plugins"
         ],
         "summary": "POST /api/v1/plugins",
-        "description": "Upload a plugin: multipart with `manifest` (JSON text) and `bundle` (one self-contained ES module, at most 1,048,576 bytes, no import/export-from/import()). A new slug, or an update that asks for more than the approved grant (`widened`), waits for approve (approve it with the returned `sha`); an update within the grant applies at once and the previous version is kept (last 5). Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
+        "description": "Upload a plugin: multipart with `manifest` (JSON text) and `bundle` (one self-contained ES module, at most 1,048,576 bytes, no import/export-from/import()). The manifest may declare `blocks` (at most 10: `{slug, title, props, required}`) that become page-builder blocks of type `plugin.<slug>.<block>`; see the edgepress skill. A new slug, or an update that asks for more than the approved grant (`widened`), waits for approve (approve it with the returned `sha`); an update within the grant applies at once and the previous version is kept (last 5). Session only: an admin (CMS role admin; store admin) whose sign-in is under 10 minutes old. A personal access token gets 403 `session_required`, a plugin token 403 `insufficient_scope`, a non-admin 403 `insufficient_role`, an older sign-in 403 `reauth_required` (sign in again). Agents cannot install or manage plugins. Every response is `Cache-Control: no-store`; every change is written to the audit log (never a secret value). CMS: /api/plugins (and its /api/v1 mirror). Store: /api/v1/plugins only.",
         "requestBody": {
           "required": true,
           "content": {

@@ -36,8 +36,9 @@ on `/api/v1/plugins`. Hand the user the two files and tell them where to upload 
 | `hooks` | Events it receives (table below). |
 | `routes` | Public URL names, `^[a-z0-9][a-z0-9-]{0,39}$`. |
 | `cron` | `"@hourly"` and/or `"@daily"`. |
+| `blocks` | Page blocks, see Blocks below. |
 
-Any other key is refused (`blocks`, `adminPanels`, `widgets` only as empty arrays). Manifest ≤ 32 KB.
+Any other key is refused (`adminPanels`, `widgets` only as empty arrays). `blocks` is described under Blocks. Manifest ≤ 32 KB.
 A new version that asks for anything the admin has not approved yet (a scope, host, hook, route,
 schedule, or a secret on a new host) waits for fresh approval; the old version keeps running. Approval is
 of that exact code AND manifest: re-uploading the same code with a different manifest needs approving again.
@@ -137,6 +138,85 @@ HTML, and your other headers are dropped. Verify webhook signatures yourself, wi
 admin saves under Settings (read it from `env.settings`): a secret cannot do this job, because the
 bundle never sees one — secrets are only substituted into outgoing requests. Settings are stored in
 plain text and shown to admins, so use a key meant for verifying, not one that grants access.
+
+## Blocks
+
+A plugin can offer page blocks that the admin places in the editor, like any built-in block. Declare them in the
+manifest, render them from `onBlock`:
+
+```json
+"blocks": [
+  { "slug": "reviews", "title": "Customer reviews",
+    "props": {
+      "count": { "type": "integer", "title": "How many", "minimum": 1, "maximum": 20, "default": 5 }
+    },
+    "required": [] }
+]
+```
+
+- At most 10 blocks per plugin; `slug` `^[a-z][a-z0-9-]{1,39}$`, `title` ≤ 60 characters.
+- `props` is a flat object of at most 20 properties. Each has a `type` of `string`, `number`, `integer` or `boolean`, and
+  optionally `title` (≤ 60), `description` (≤ 200), `enum` (≤ 50 values), `minimum`/`maximum`, `maxLength` (strings, ≤ 2000,
+  default 500) and `default`. `required` lists property names. Anything else is refused at upload.
+- Adding a block, or changing a block's props, needs the admin's approval again ("Shows content on your pages").
+
+`onBlock(name, props, env)` returns `{ html, css? }`. `props` are the admin's validated values. `env.storage` is
+**read-only** and its values are strings (store JSON with `JSON.stringify`, read it with `JSON.parse`); `env.settings` and
+`env.locale` are available. There is **no `env.api`, no `fetch` and no secrets** in a block. A block gets 20 ms of CPU and
+1 second; `html` ≤ 64 KB, `css` ≤ 16 KB.
+
+Because a block cannot fetch, fill storage from `onSchedule`, `onEvent` or `onRequest` and render from storage. EdgePress
+renders ahead of time, not per visitor: the page shows the stored rendering. A storage write updates the block within
+about a minute; time-based content (a relative date, "open now") is re-rendered hourly while a page has shown it in the
+last two days. Block renders have their own daily budget per site, separate from events, routes and schedules. If a render fails, visitors keep
+the last good one and the admin sees the error under Logs.
+
+The output is sanitised, so write plain markup:
+
+- Kept: layout and text tags, `class`, `style` (filtered), links, and images. An image (`src` and each `srcset` entry) is
+  kept only when it is site-relative (`/media/…`) or `https://` from a host in your manifest's `egress` list; any other
+  image is dropped. Links to other sites get `rel="noopener nofollow"`.
+- Dropped: `<script>`, forms and inputs, iframes and embeds, `on*` handlers, `javascript:` URLs, `http` images, and any `url(...)`
+  inside a `style` attribute.
+- CSS is scoped under the block's wrapper automatically. Plain rules and `@media` only (`@import`, `@font-face` and other
+  at-rules are dropped; `:root`, `html` and `body` mean the block's own element, which sits inside the clipping wrapper), a declaration with `!important` is dropped, and so is
+  one with a remote `url(...)` (inline `data:image/` URLs are allowed in the CSS you return, not in `style` attributes). The wrapper clips anything painted outside its box.
+
+Worked example, "Customer reviews": the schedule fetches into storage, the block renders from it.
+
+```json
+{
+  "slug": "reviews", "version": "1.0.0", "products": ["cms"],
+  "egress": ["api.reviews.example"],
+  "cron": ["@hourly"],
+  "blocks": [{ "slug": "reviews", "title": "Customer reviews",
+    "props": { "count": { "type": "integer", "title": "How many", "minimum": 1, "maximum": 20, "default": 5 } } }]
+}
+```
+
+```js
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+export default {
+  async onSchedule(name, env) {
+    const res = await fetch('https://api.reviews.example/v1/reviews?limit=20');
+    if (!res.ok) throw new Error(`reviews ${res.status}`);
+    const list = await res.json();                           // [{ author, stars, text }]
+    await env.storage.put('reviews', JSON.stringify(list));  // a storage write re-renders the block within ~1 minute
+  },
+  async onBlock(name, props, env) {
+    const list = JSON.parse((await env.storage.get('reviews')) ?? '[]').slice(0, props.count ?? 5);
+    const items = list.map((r) =>
+      `<li><strong>${esc(r.author)}</strong> ${'★'.repeat(r.stars)}<p>${esc(r.text)}</p></li>`).join('');
+    return {
+      html: `<ul class="reviews">${items}</ul>`,
+      css: '.reviews{list-style:none;padding:0;display:grid;gap:1rem} @media (min-width:700px){.reviews{grid-template-columns:1fr 1fr}}',
+    };
+  },
+};
+```
+
+Escape every value you put in `html`: it comes from outside, and the sanitiser is a backstop, not a substitute.
 
 ## Limits and delivery
 
