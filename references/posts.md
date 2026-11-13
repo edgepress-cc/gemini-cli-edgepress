@@ -63,6 +63,12 @@ Schedule for future publishing (`scheduled_at` ISO 8601, per SKILL publish flow)
 
 ## Gotchas
 
+- **Who may write which post.** Admins and editors: every post. Authors and
+  columnists: only posts they created (`user_id`), drafts or published.
+  Contributors: only their own drafts — creating or saving one as `published`
+  is a 403 ("an editor publishes them"), and they read published posts plus
+  their own drafts only. Subscribers write nothing. `is_featured` is honoured
+  only for editors and admins. On a 403, report the reason; don't retry.
 - **Update is PUT, not PATCH.** `/posts/{id}` only accepts PUT. A partial body
   nulls out every field you omit — always GET → merge with `jq` → PUT.
 - `slug` is auto-derived from `title` if omitted. Passing an explicit slug

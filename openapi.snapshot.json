@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "EdgePress Tenant API",
-    "version": "1.80.0",
+    "version": "1.85.0",
     "description": "Per-tenant CMS API. Authenticate every request with a personal access token: `Authorization: Bearer epat_...`. Create + manage tokens at `/admin/settings/api-tokens`. Every token-authenticated response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` (epoch seconds); a 429 adds `Retry-After`."
   },
   "servers": [
@@ -1303,6 +1303,15 @@
             ],
             "default": null,
             "description": "Tax engine T1 (migration 0210): one of this store's tax classes (GET /api/v1/tax/classes); null = the `standard` class. A variant with no class inherits its parent's. Absent (reads null) on a tenant that predates the column."
+          },
+          "bookable": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ],
+            "default": 0,
+            "description": "1 = sold as a time slot (booking). Needs product_type \"service\" (400 bookable_requires_service); turning it on creates the booking resource with Mon-Fri 09:00-17:00 hours; turning it off keeps the resource and its bookings."
           }
         }
       },
@@ -1805,6 +1814,34 @@
               "null"
             ],
             "description": "The jurisdiction row that priced the line (migration 0214); null under the flat fallback, TaxJar, zero-tax treatments, or on a pre-T1 row. No FK — the snapshot outlives the rule."
+          },
+          "booking": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Booking P3: the slot booked on this line, null for an unbooked line. Present only on an order that has a booking (store-timezone name in the order's booking_timezone). status is held, confirmed or released.",
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "starts_at": {
+                "type": "integer",
+                "description": "UTC epoch seconds."
+              },
+              "ends_at": {
+                "type": "integer",
+                "description": "UTC epoch seconds."
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "held",
+                  "confirmed",
+                  "released"
+                ]
+              }
+            }
           }
         }
       },
@@ -2474,6 +2511,20 @@
           "tax_class_slug": {
             "type": "string",
             "description": "Tax engine T1: the line's tax class slug (the product's store_tax_classes row, a variant inheriting its parent's), 'standard' when the product has none or the tenant predates migration 0204."
+          },
+          "booking_starts_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Epoch seconds of the booked slot, null for an ordinary line."
+          },
+          "booking_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The slot in the store's zone and language, e.g. \"Tue 14 Apr, 09:00–10:00\". A slot no longer offered sets available:false and keeps the label."
           }
         }
       },
@@ -11092,7 +11143,7 @@
           "Posts"
         ],
         "summary": "GET /api/posts",
-        "description": "Unpublished posts are returned only to a session or token of a writing role (author, columnist, editor, admin); anyone else, a subscriber or contributor included, gets published posts only (a single unpublished post answers 404).",
+        "description": "Unpublished posts are returned to a session or token of an author, columnist, editor or admin; a contributor sees published posts and their own drafts; anyone else, a subscriber included, gets published posts only (a single unpublished post answers 404).",
         "responses": {
           "200": {
             "description": "OK",
@@ -11126,6 +11177,7 @@
         }
       },
       "post": {
+        "description": "Contributor role or above. An author, columnist, editor or admin may create a post as `published`; a contributor's post must be a `draft` (403 otherwise: an editor publishes it). The post belongs to its creator (`user_id`). `is_featured` is stored only for an editor or admin.",
         "tags": [
           "Posts"
         ],
@@ -11450,7 +11502,7 @@
           "Posts"
         ],
         "summary": "GET /api/posts/slug/{slug}",
-        "description": "Unpublished posts are returned only to a session or token of a writing role (author, columnist, editor, admin); anyone else, a subscriber or contributor included, gets published posts only (a single unpublished post answers 404).",
+        "description": "Unpublished posts are returned to a session or token of an author, columnist, editor or admin; a contributor sees published posts and their own drafts; anyone else, a subscriber included, gets published posts only (a single unpublished post answers 404).",
         "responses": {
           "200": {
             "description": "OK",
@@ -11711,7 +11763,7 @@
           "Posts"
         ],
         "summary": "GET /api/posts/{id}",
-        "description": "Unpublished posts are returned only to a session or token of a writing role (author, columnist, editor, admin); anyone else, a subscriber or contributor included, gets published posts only (a single unpublished post answers 404).",
+        "description": "Unpublished posts are returned to a session or token of an author, columnist, editor or admin; a contributor sees published posts and their own drafts; anyone else, a subscriber included, gets published posts only (a single unpublished post answers 404).",
         "responses": {
           "200": {
             "description": "OK",
@@ -11742,6 +11794,7 @@
         }
       },
       "put": {
+        "description": "Admins and editors change every post. Authors and columnists change only posts they created (`user_id`), drafts or published; a contributor only their own drafts, and cannot publish one. Anything else is 403 with the reason. `is_featured` is changed only by an editor or admin (anyone else keeps the stored value).",
         "tags": [
           "Posts"
         ],
@@ -11788,6 +11841,7 @@
         }
       },
       "delete": {
+        "description": "Admins and editors delete every post. Authors and columnists delete only posts they created (`user_id`); a contributor only their own drafts. Anything else is 403 with the reason.",
         "tags": [
           "Posts"
         ],
@@ -13118,7 +13172,7 @@
           "Store"
         ],
         "summary": "POST /api/shop/cart",
-        "description": "Add a product to the cart, creating the cart if needed — a guest's first add mints the __Host-shop_cart cookie. Adding a product already in the cart sums quantities (capped at 999). Signed-in requests must echo __Host-shop_csrf in X-CSRF-Token. Rate limited per IP; sustained abuse returns 429.",
+        "description": "Add a product to the cart, creating the cart if needed — a guest's first add mints the __Host-shop_cart cookie. Adding a product already in the cart sums quantities (capped at 999). Signed-in requests must echo __Host-shop_csrf in X-CSRF-Token. Rate limited per IP; sustained abuse returns 429. A bookable service also needs booking_starts_at (see the field); its line quantity is forced to 1.",
         "security": [
           {
             "shopperSession": []
@@ -13147,6 +13201,19 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 999
+                  },
+                  "addon_ids": {
+                    "type": "array",
+                    "maxItems": 12,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "description": "Add-ons the shopper ticked, each added at quantity 1 after the main line. Only add-ons linked to the posted product (or a variant of one) that are sellable now are added; unlinked, unsellable, duplicate and non-integer ids are skipped silently. More than 12 entries or a non-array is 400 invalid_body."
+                  },
+                  "booking_starts_at": {
+                    "type": "integer",
+                    "description": "Epoch seconds of the slot start. Required (400 slot_required) when the product's top-level product is bookable; must be a slot GET /api/shop/booking/slots offers (else 409 slot_unavailable). The line is quantity 1: adding the product again with another slot moves the line, with the same slot changes nothing. Ignored for a product that is not bookable."
                   }
                 }
               }
@@ -13313,6 +13380,10 @@
                   "csrf": {
                     "type": "string",
                     "description": "The __Host-shop_csrf synchronizer, required for a signed-in shopper — the product page embeds it as a hidden field."
+                  },
+                  "booking_starts_at": {
+                    "type": "integer",
+                    "description": "Forwarded as booking_starts_at to POST /api/shop/cart (the product page's slot picker)."
                   }
                 }
               }
@@ -13757,7 +13828,7 @@
           "Store"
         ],
         "summary": "PATCH /api/shop/cart/{itemId}",
-        "description": "Set a cart line's quantity. The line must belong to the cart this request's own credentials resolve to — anyone else's line id returns the same 404 as a nonexistent one. Signed-in requests must echo __Host-shop_csrf in X-CSRF-Token.",
+        "description": "Set a cart line's quantity. The line must belong to the cart this request's own credentials resolve to — anyone else's line id returns the same 404 as a nonexistent one. Signed-in requests must echo __Host-shop_csrf in X-CSRF-Token. A line holding a booked slot (booking_starts_at) is fixed at quantity 1: any other quantity is 400 quantity_fixed.",
         "security": [
           {
             "shopperSession": []
@@ -14679,7 +14750,7 @@
             "description": "CSRF_INVALID (signed-in, bad or missing X-CSRF-Token) or cross_origin_rejected (guest POST from another origin)."
           },
           "409": {
-            "description": "cart_unavailable_items — the cart holds a line whose product is archived, hidden, off-currency or over the price ceiling; product_ids names them. Remove those lines and retry. Or cart_insufficient_stock — a line asks for more units than the product has in stock; product_ids names the short lines (products with stock null are untracked and never refused). Reduce those quantities (or remove the lines) and retry. When a concurrent order took the last units mid-checkout the same code is returned with raced: true — there product_ids lists every line of the cart (the aborted transaction cannot say which line tripped), nothing was charged and the cart is intact. Or discount_unavailable (discounts v1) — a code the cart had accepted hit its total_limit or per_customer_limit since (another shopper redeemed the last use, or this email already used it); `code` names it and `reason` is the shopper-facing sentence. Nothing stays written (an order that had already committed in the narrowest race is undone, stock returned): remove the code (DELETE /api/shop/cart/discount/{code}) and retry."
+            "description": "cart_unavailable_items — the cart holds a line whose product is archived, hidden, off-currency or over the price ceiling; product_ids names them. Remove those lines and retry. Or cart_insufficient_stock — a line asks for more units than the product has in stock; product_ids names the short lines (products with stock null are untracked and never refused). Reduce those quantities (or remove the lines) and retry. When a concurrent order took the last units mid-checkout the same code is returned with raced: true — there product_ids lists every line of the cart (the aborted transaction cannot say which line tripped), nothing was charged and the cart is intact. Or discount_unavailable (discounts v1) — a code the cart had accepted hit its total_limit or per_customer_limit since (another shopper redeemed the last use, or this email already used it); `code` names it and `reason` is the shopper-facing sentence. Nothing stays written (an order that had already committed in the narrowest race is undone, stock returned): remove the code (DELETE /api/shop/cart/discount/{code}) and retry. Booking (P3): slot_required — a line of a bookable service holds no slot (e.g. it was carted as an add-on); product_ids names it: remove it and add it again with booking_starts_at. Or slot_unavailable — a booked line's slot is no longer offered (past its notice, outside the hours, blocked, or beyond the days-ahead window); product_ids names it: pick another slot (GET /api/shop/booking/slots). Or slot_quantity — a booked line's quantity is not 1 (a booked line is one seat); product_ids names it: remove it and add it again. Or slot_taken — another order took the slot's last seat; product_ids lists every booked line, nothing was written and the cart is intact: pick another slot and retry."
           },
           "413": {
             "description": "body_too_large — the declared Content-Length exceeds the 16KB shop-API body cap."
@@ -19707,6 +19778,7 @@
         }
       },
       "put": {
+        "description": "An admin edits any user; anyone else only their own profile, with `?self=true`. A user with an EdgePress account (`account_id`: the site owner, a collaborator) cannot have their role, status or email changed here (400): the owner manages them under Collaborators in the EdgePress account. `role` is one of editor, author, columnist, contributor, subscriber (`admin`: 400). `email` (admin, site-only user): 400 when malformed, 409 when another user has it, compared case-insensitively. Setting `status` to `inactive` ends the user's sessions.",
         "tags": [
           "Users"
         ],
@@ -19757,7 +19829,7 @@
           "Users"
         ],
         "summary": "DELETE /api/users",
-        "description": "Admin only (403 otherwise), whatever the query string says: `self=true` exempts only PUT, which edits the caller's own profile.",
+        "description": "Admin only (403 otherwise), whatever the query string says: `self=true` exempts only PUT, which edits the caller's own profile. A user with an EdgePress account is refused (403): remove their access under Collaborators in the EdgePress account. Deleting someone also ends their sessions; invites and invite codes they created stay valid.",
         "responses": {
           "200": {
             "description": "Deleted",
@@ -27486,7 +27558,7 @@
           "Store"
         ],
         "summary": "GET /api/v1/form-submissions",
-        "description": "The operator's contact-form inbox (store_form_submissions, store-forms-p2 Tasks 1/6/8/9), NEWEST FIRST, keyset-paged on `id` like /api/v1/reviews (`next_cursor` → `?cursor=`). Unfiltered by default (no implicit `status`). List rows are a lean preview — `fields`/`values` are GET /{id}-only, but `notified_at` rides along here too so the inbox can flag a submission the owner was never emailed about without a second request. `?format=csv` streams EVERY row the filters match, not just the current page — an export capped at the page size would silently hand the owner an incomplete file. The CSV header is `submitted_at,status,form_name` then the union of field keys across the matched rows' fields_snapshot, in first-seen order (never alphabetised, so a form's own field order survives into the spreadsheet). Any cell whose text begins with `=`, `+`, `-` or `@` is prefixed with a single quote — otherwise Excel/Sheets executes it as a formula the instant the file is opened, a direct path from a filled-in contact form to code running on the owner's machine. Authenticated with a store PAT; read-only tokens may GET.",
+        "description": "On a store site: the operator's contact-form inbox (store_form_submissions, store-forms-p2 Tasks 1/6/8/9), NEWEST FIRST, keyset-paged on `id` like /api/v1/reviews (`next_cursor` → `?cursor=`). Unfiltered by default (no implicit `status`). List rows are a lean preview — `fields`/`values` are GET /{id}-only, but `notified_at` rides along here too so the inbox can flag a submission the owner was never emailed about without a second request. `?format=csv` streams EVERY row the filters match, not just the current page — an export capped at the page size would silently hand the owner an incomplete file. The CSV header is `submitted_at,status,form_name` then the union of field keys across the matched rows' fields_snapshot, in first-seen order (never alphabetised, so a form's own field order survives into the spreadsheet). Any cell whose text begins with `=`, `+`, `-` or `@` is prefixed with a single quote — otherwise Excel/Sheets executes it as a formula the instant the file is opened, a direct path from a filled-in contact form to code running on the owner's machine. Authenticated with a store PAT; read-only tokens may GET. On a CMS or landing site this path is the form block's inbox instead, the same handler as `GET /api/form-submissions`: admin and editor only (plugin tokens always refused), the CMS row shape and filters (`status`, `form_name`, `since`, `limit`, `cursor`), JSON by default, text/csv for `?format=csv`.",
         "security": [
           {
             "bearerAuth": []
@@ -27618,7 +27690,7 @@
           "Store"
         ],
         "summary": "GET /api/v1/form-submissions/{id}",
-        "description": "One submission with `fields` (the parsed fields_snapshot — the field definitions as they were at submit time) alongside `values` (the parsed values_json), so the inbox can label a submission whose form has since been edited without ever joining back to the live block config.",
+        "description": "On a store site: one submission with `fields` (the parsed fields_snapshot — the field definitions as they were at submit time) alongside `values` (the parsed values_json), so the inbox can label a submission whose form has since been edited without ever joining back to the live block config. On a CMS or landing site this is the form block inbox's `GET /api/form-submissions/{id}` (admin and editor only, plugin tokens always refused).",
         "security": [
           {
             "bearerAuth": []
@@ -27653,7 +27725,7 @@
           "Store"
         ],
         "summary": "PATCH /api/v1/form-submissions/{id}",
-        "description": "The ONLY writable field is `status`. A submission is a record of what someone actually sent — `values`, `fields_snapshot`, `submitter_email` and the timestamps are never writable through this endpoint. Fix round 1: an unknown field is a 400 `unknown_field:<name>`, same convention as `/api/v1/customers/{id}` — never silently ignored, so a client that PATCHes e.g. `values` expecting to rewrite the record is told it didn't, not handed a false 200. A body with no `status` key is a 400 too. Setting `status` to `read` stamps `read_at` the first time only — a later PATCH never moves it. Audited (action `form_submission.status`). Needs a write-capable PAT or a session.",
+        "description": "On a store site: the ONLY writable field is `status`. A submission is a record of what someone actually sent — `values`, `fields_snapshot`, `submitter_email` and the timestamps are never writable through this endpoint. Fix round 1: an unknown field is a 400 `unknown_field:<name>`, same convention as `/api/v1/customers/{id}` — never silently ignored, so a client that PATCHes e.g. `values` expecting to rewrite the record is told it didn't, not handed a false 200. A body with no `status` key is a 400 too. Setting `status` to `read` stamps `read_at` the first time only — a later PATCH never moves it. Audited (action `form_submission.status`). Needs a write-capable PAT or a session. On a CMS or landing site this is `PATCH /api/form-submissions/{id}`: `status` only, admin and editor only, plugin and read-only tokens refused.",
         "security": [
           {
             "bearerAuth": []
@@ -27721,7 +27793,7 @@
           "Store"
         ],
         "summary": "DELETE /api/v1/form-submissions/{id}",
-        "description": "Remove a submission outright. Audited (action `form_submission.delete`).",
+        "description": "On a store site: remove a submission outright. Audited (action `form_submission.delete`). On a CMS or landing site this is `DELETE /api/form-submissions/{id}`: admin and editor only, plugin and read-only tokens refused.",
         "security": [
           {
             "bearerAuth": []
@@ -28913,6 +28985,10 @@
                               }
                             }
                           }
+                        },
+                        "booking_timezone": {
+                          "type": "string",
+                          "description": "IANA timezone of the store; present only when an item carries a booking."
                         }
                       }
                     }
@@ -31821,6 +31897,15 @@
                       "null"
                     ],
                     "description": "One of this store's tax classes, or null for standard. Another store's id, an unknown id or a non-integer is a 400 invalid_tax_class; a real id while the store is still finishing migration 0210 is a 503."
+                  },
+                  "bookable": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ],
+                    "default": 0,
+                    "description": "1 = sold as a time slot (booking). Needs product_type \"service\" (400 bookable_requires_service); turning it on creates the booking resource with Mon-Fri 09:00-17:00 hours; turning it off keeps the resource and its bookings."
                   }
                 }
               }
@@ -31930,7 +32015,7 @@
           "Store"
         ],
         "summary": "POST /api/v1/products/bulk",
-        "description": "Applies one action to many products rows at once. Every id must belong to THIS store — if ANY id is missing or owned by another store, the WHOLE request is rejected with 400 cross_store_or_missing_ids:<ids> and NOTHING is applied (no partial application of a hostile or stale id list). Idempotent per id — applying the same action twice is a no-op. At most 500 ids per call. enable/disable set visible=1/0; delete removes the row; add_category/remove_category (with category_id) write the join table. Served by STORE tenants only; read-only tokens may not POST.",
+        "description": "Applies one action to many products rows at once. Every id must belong to THIS store — if ANY id is missing or owned by another store, the WHOLE request is rejected with 400 cross_store_or_missing_ids:<ids> and NOTHING is applied (no partial application of a hostile or stale id list). Idempotent per id — applying the same action twice is a no-op. At most 500 ids per call. enable/disable set visible=1/0; delete removes the row; add_category/remove_category (with category_id) write the join table. Served by STORE tenants only; read-only tokens may not POST. delete refuses the WHOLE request with 409 `product_has_bookings` (and `product_ids`) when any listed service has an upcoming booking.",
         "security": [
           {
             "bearerAuth": []
@@ -32030,6 +32115,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "product_has_bookings (with product_ids): a listed service still has upcoming bookings - nothing is deleted. main_product: the offer profile's main product."
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -33817,6 +33905,15 @@
                       "null"
                     ],
                     "description": "One of this store's tax classes, or null for standard. Another store's id, an unknown id or a non-integer is a 400 invalid_tax_class; a real id while the store is still finishing migration 0210 is a 503."
+                  },
+                  "bookable": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ],
+                    "default": 0,
+                    "description": "1 = sold as a time slot (booking). Needs product_type \"service\" (400 bookable_requires_service); turning it on creates the booking resource with Mon-Fri 09:00-17:00 hours; turning it off keeps the resource and its bookings. While a product is bookable, changing product_type away from \"service\" is also 400 bookable_requires_service (send bookable: 0 in the same PATCH)."
                   }
                 }
               }
@@ -33945,7 +34042,7 @@
           "Store"
         ],
         "summary": "DELETE /api/v1/products/{id}",
-        "description": "Delete a product. Its category-membership rows are removed with it; categories themselves are untouched. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET.",
+        "description": "Delete a product. Its category-membership rows are removed with it; categories themselves are untouched. Served by STORE tenants only (product: \"store\" from GET /api/store); a CMS tenant has no such route — the call returns 404 (or 401 when authentication fails first) and never store data. Authenticated with a store PAT; read-only tokens may only GET. On a store running the offer profile the main product cannot be deleted: 409 `main_product`. On a full store the delete proceeds and clears the store's main product. A bookable service with an upcoming booking (not released, not yet ended) cannot be deleted: 409 `product_has_bookings` - cancel or refund those bookings first; past and released bookings do not block.",
         "security": [
           {
             "bearerAuth": []
@@ -33999,6 +34096,9 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "409": {
+            "description": "main_product: this is the offer profile's main product (a full store deletes it). product_has_bookings: the service still has upcoming bookings."
           }
         }
       }
@@ -42285,7 +42385,7 @@
         ],
         "summary": "GET /api/weather",
         "security": [],
-        "description": "Current weather for the ticker block, fetched server-side from weatherapi.com with the site's own key. The key is the admin-only setting `weather_api_key` (write it with PUT /api/settings; the settings API never returns it). Cached 10 minutes per city. Cache misses are limited to 20 per minute per IP.",
+        "description": "Current weather for the ticker block, fetched server-side from weatherapi.com with the site's own key. The key is the admin-only setting `weather_api_key` (write it with PUT /api/settings; the settings API never returns it). Cached 10 minutes per city. Cache misses are limited to 20 per minute per IP. Served on CMS and landing sites (the ticker block is on both palettes).",
         "parameters": [
           {
             "name": "city",
@@ -48220,6 +48320,1871 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/forms": {
+      "post": {
+        "tags": [
+          "Forms"
+        ],
+        "summary": "Submit a form block (public)",
+        "operationId": "submitForm",
+        "security": [
+          {}
+        ],
+        "description": "The form block's own `<form>`. No auth: same-origin only (Origin, else Referer, must be this site), Turnstile when configured, a honeypot field, 5 submissions per 10 minutes per IP (kept only as a salted hash). A form post answers 303 to `<ep-page>?sent=<block_id>#form-<block_id>`; when it is refused it answers 303 to `<ep-page>?form_error=<code>#form-<block_id>` (`invalid` when a field fails validation, `turnstile_failed`, `rate_limited`, `cross_origin`) so the block can show the reason, provided the post names a usable `ep-page` and `block_id`; otherwise it gets the plain status and code. A JSON body answers 201 `{ok: true}` (no submission id) or the status with `{error}` / 400 `{errors}`. A filled honeypot looks like a success and stores nothing. An unknown, inactive or non-form block, or one nested inside another block, is a flat 404 `not_found`. Owners are emailed about new submissions (at most one email per 15 minutes) on the site's own email account.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "block_id"
+                ],
+                "description": "Plus one entry per field key of the form's definition.",
+                "properties": {
+                  "block_id": {
+                    "type": "integer",
+                    "description": "The form block's id (the form's hidden field). Forms nested inside another block cannot be submitted."
+                  },
+                  "ep-page": {
+                    "type": "string",
+                    "description": "Same-site path to return to (hidden field; hyphenated so no field key can collide with it). ASCII only (the page's percent-encoded path); anything else is treated as `/`"
+                  },
+                  "website_url": {
+                    "type": "string",
+                    "description": "Honeypot: leave empty"
+                  },
+                  "cf-turnstile-response": {
+                    "type": "string",
+                    "description": "The Turnstile widget's token"
+                  }
+                },
+                "additionalProperties": true
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "block_id"
+                ],
+                "description": "Plus one entry per field key of the form's definition.",
+                "properties": {
+                  "block_id": {
+                    "type": "integer",
+                    "description": "The form block's id (the form's hidden field). Forms nested inside another block cannot be submitted."
+                  },
+                  "ep-page": {
+                    "type": "string",
+                    "description": "Same-site path to return to (hidden field; hyphenated so no field key can collide with it). ASCII only (the page's percent-encoded path); anything else is treated as `/`"
+                  },
+                  "website_url": {
+                    "type": "string",
+                    "description": "Honeypot: leave empty"
+                  },
+                  "cf-turnstile-response": {
+                    "type": "string",
+                    "description": "The Turnstile widget's token"
+                  }
+                },
+                "additionalProperties": true
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "block_id"
+                ],
+                "description": "Plus one entry per field key of the form's definition.",
+                "properties": {
+                  "block_id": {
+                    "type": "integer",
+                    "description": "The form block's id (the form's hidden field). Forms nested inside another block cannot be submitted."
+                  },
+                  "ep-page": {
+                    "type": "string",
+                    "description": "Same-site path to return to (hidden field; hyphenated so no field key can collide with it). ASCII only (the page's percent-encoded path); anything else is treated as `/`"
+                  },
+                  "website_url": {
+                    "type": "string",
+                    "description": "Honeypot: leave empty"
+                  },
+                  "cf-turnstile-response": {
+                    "type": "string",
+                    "description": "The Turnstile widget's token"
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "JSON body: stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "303": {
+            "description": "Form post: redirect back to the page (`?sent=<block_id>`, or `?form_error=<code>` when refused)"
+          },
+          "400": {
+            "description": "JSON body: `{errors}` per field key; any caller: an unreadable body (`invalid_body`)"
+          },
+          "403": {
+            "description": "JSON body (or a form post without a usable page/block id): cross-origin (`cross_origin`) or the Turnstile check failed (`turnstile_failed`)"
+          },
+          "404": {
+            "description": "No such active, top-level form block (`not_found`)"
+          },
+          "429": {
+            "description": "JSON body (or a form post without a usable page/block id): too many submissions from this connection (`rate_limited`)"
+          }
+        }
+      }
+    },
+    "/api/form-submissions": {
+      "get": {
+        "tags": [
+          "Forms"
+        ],
+        "summary": "List form submissions",
+        "operationId": "listFormSubmissions",
+        "description": "The owner's inbox for the form block. Admin and editor only (a submission is visitors' personal data); a read-only token may read, a plugin token never can. Newest first, keyset-paged: pass the previous `next_cursor` as `cursor`. Rows are a lean preview; `GET /api/form-submissions/{id}` has the values. JSON by default; `format=csv` returns every matching row (not one page) as a download: submitted_at, status, form_name, then one column per field key; cells that start like a formula are neutralised.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "new",
+                "read",
+                "archived"
+              ]
+            }
+          },
+          {
+            "name": "form_name",
+            "in": "query",
+            "required": false,
+            "description": "Filter by form name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Unix seconds; rows created at or after",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Default 50, max 200",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Previous page's next_cursor",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "description": "`csv` for the export",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "csv"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK — JSON by default, text/csv when `?format=csv`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "submissions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "form_name": {
+                            "type": "string"
+                          },
+                          "submitter_email": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "new",
+                              "read",
+                              "archived"
+                            ]
+                          },
+                          "created_at": {
+                            "type": "integer"
+                          },
+                          "read_at": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "notified_at": {
+                            "type": "integer",
+                            "nullable": true,
+                            "description": "When the owner digest covering it was emailed; null = never emailed."
+                          }
+                        }
+                      }
+                    },
+                    "next_cursor": {
+                      "type": "integer",
+                      "nullable": true
+                    }
+                  }
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Not admin or editor, or a plugin token: plugin tokens are always refused ({error:'insufficient_role'})"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "400": {
+            "description": "Bad filter, limit or cursor"
+          }
+        }
+      }
+    },
+    "/api/form-submissions/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Forms"
+        ],
+        "summary": "Get one form submission",
+        "operationId": "getFormSubmission",
+        "description": "The submission with the form's field definitions as they were when it was sent (`fields`) beside what was sent (`values`), so an edited form never relabels it.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "submission": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "form_name": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "values": {
+                          "type": "object"
+                        },
+                        "submitter_email": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "new",
+                            "read",
+                            "archived"
+                          ]
+                        },
+                        "created_at": {
+                          "type": "integer"
+                        },
+                        "read_at": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "notified_at": {
+                          "type": "integer",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Not admin or editor, or a plugin token: plugin tokens are always refused ({error:'insufficient_role'})"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "404": {
+            "description": "No such submission ({error:'not_found'})"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Forms"
+        ],
+        "summary": "Mark a form submission new, read or archived",
+        "operationId": "updateFormSubmission",
+        "description": "`status` is the only writable field; any other key is 400 `unknown_field:<name>`. `read_at` is stamped the first time it becomes read. Audited as `form_submission.status`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "new",
+                      "read",
+                      "archived"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "new",
+                        "read",
+                        "archived"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Not admin or editor, or a plugin token ({error:'insufficient_role'}), or a read-only token ({error:'read_only_token'})"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "404": {
+            "description": "No such submission ({error:'not_found'})"
+          },
+          "400": {
+            "description": "Unknown field or invalid status"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Forms"
+        ],
+        "summary": "Delete a form submission",
+        "operationId": "deleteFormSubmission",
+        "description": "Deletes it for good. Audited as `form_submission.delete`.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/InvalidToken"
+          },
+          "403": {
+            "description": "Not admin or editor, or a plugin token ({error:'insufficient_role'}), or a read-only token ({error:'read_only_token'})"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "404": {
+            "description": "No such submission ({error:'not_found'})"
+          }
+        }
+      }
+    },
+    "/api/v1/products/{id}/addons": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/products/{id}/addons",
+        "description": "The products offered alongside this one, in order. Read-only tokens may GET. Served by STORE tenants only.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "addons": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "slug": {
+                            "type": "string"
+                          },
+                          "price": {
+                            "type": "integer"
+                          },
+                          "compare_at_price": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "visible": {
+                            "type": "integer"
+                          },
+                          "has_variants": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Unknown product (error not_found)."
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PUT /api/v1/products/{id}/addons",
+        "description": "REPLACE the add-on list; order is the array order. Add-ons must be top-level products of this store and not the product itself. 400 `invalid_body` (not an array of positive integers, more than 12, or a duplicate), 400 `invalid_addon` with the offending `id`.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "ids"
+                ],
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "maxItems": 12,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "addons": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "slug": {
+                            "type": "string"
+                          },
+                          "price": {
+                            "type": "integer"
+                          },
+                          "compare_at_price": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "currency": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "visible": {
+                            "type": "integer"
+                          },
+                          "has_variants": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_body or invalid_addon."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Unknown product (error not_found)."
+          }
+        }
+      }
+    },
+    "/api/v1/offer": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/offer",
+        "description": "The store's main product (the offer profile's single product), or nulls when none is set. Served by STORE tenants only.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "main_product_id": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "product": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "slug": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/v1/booking/resources": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/booking/resources",
+        "description": "Every bookable service resource (one per product). Read-only tokens may GET. Served by STORE tenants only (also the offer profile).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "resources": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "product_id": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string",
+                            "maxLength": 80
+                          },
+                          "slot_minutes": {
+                            "type": "integer",
+                            "minimum": 5,
+                            "maximum": 1440
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 1000
+                          },
+                          "buffer_minutes": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1440
+                          },
+                          "min_notice_hours": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 8760
+                          },
+                          "max_days_ahead": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 730
+                          },
+                          "id": {
+                            "type": "integer"
+                          },
+                          "product_name": {
+                            "type": "string"
+                          },
+                          "bookable": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body (error invalid_body, invalid_field with `field`, invalid_hours)."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Unknown resource (error not_found)."
+          }
+        }
+      }
+    },
+    "/api/v1/booking/resources/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/booking/resources/{id}",
+        "description": "One resource. Read-only tokens may GET. Served by STORE tenants only (also the offer profile).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "resource": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "product_id": {
+                          "type": "integer"
+                        },
+                        "name": {
+                          "type": "string",
+                          "maxLength": 80
+                        },
+                        "slot_minutes": {
+                          "type": "integer",
+                          "minimum": 5,
+                          "maximum": 1440
+                        },
+                        "capacity": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 1000
+                        },
+                        "buffer_minutes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1440
+                        },
+                        "min_notice_hours": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8760
+                        },
+                        "max_days_ahead": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 730
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body (error invalid_body, invalid_field with `field`, invalid_hours)."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Unknown resource (error not_found)."
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PATCH /api/v1/booking/resources/{id}",
+        "description": "Change the booking rules; send any of name, slot_minutes, capacity, buffer_minutes, min_notice_hours, max_days_ahead. 400 `invalid_field` with `field` outside the ranges, 400 `invalid_body` for an unknown key. Existing bookings are kept. Read-only tokens may GET. Served by STORE tenants only (also the offer profile).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "resource": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "product_id": {
+                          "type": "integer"
+                        },
+                        "name": {
+                          "type": "string",
+                          "maxLength": 80
+                        },
+                        "slot_minutes": {
+                          "type": "integer",
+                          "minimum": 5,
+                          "maximum": 1440
+                        },
+                        "capacity": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 1000
+                        },
+                        "buffer_minutes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1440
+                        },
+                        "min_notice_hours": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 8760
+                        },
+                        "max_days_ahead": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 730
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body (error invalid_body, invalid_field with `field`, invalid_hours)."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Unknown resource (error not_found)."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "slot_minutes": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 1440
+                  },
+                  "capacity": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000
+                  },
+                  "buffer_minutes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1440
+                  },
+                  "min_notice_hours": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 8760
+                  },
+                  "max_days_ahead": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 730
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/booking/resources/{id}/hours": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/booking/resources/{id}/hours",
+        "description": "Weekly opening ranges. Read-only tokens may GET. Served by STORE tenants only (also the offer profile).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "hours": {
+                      "type": "array",
+                      "maxItems": 50,
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "weekday",
+                          "start_min",
+                          "end_min"
+                        ],
+                        "properties": {
+                          "weekday": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 6,
+                            "description": "0 = Sunday"
+                          },
+                          "start_min": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1439
+                          },
+                          "end_min": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 1440,
+                            "description": "Greater than start_min"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body (error invalid_body, invalid_field with `field`, invalid_hours)."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Unknown resource (error not_found)."
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PUT /api/v1/booking/resources/{id}/hours",
+        "description": "REPLACE all opening ranges (at most 50). 400 `invalid_hours` when a range is outside the limits or end_min <= start_min. Read-only tokens may GET. Served by STORE tenants only (also the offer profile).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "hours": {
+                      "type": "array",
+                      "maxItems": 50,
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "weekday",
+                          "start_min",
+                          "end_min"
+                        ],
+                        "properties": {
+                          "weekday": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 6,
+                            "description": "0 = Sunday"
+                          },
+                          "start_min": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1439
+                          },
+                          "end_min": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 1440,
+                            "description": "Greater than start_min"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body (error invalid_body, invalid_field with `field`, invalid_hours)."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Unknown resource (error not_found)."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "hours": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "weekday",
+                        "start_min",
+                        "end_min"
+                      ],
+                      "properties": {
+                        "weekday": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 6,
+                          "description": "0 = Sunday"
+                        },
+                        "start_min": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1439
+                        },
+                        "end_min": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 1440,
+                          "description": "Greater than start_min"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/booking/resources/{id}/blocks": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/booking/resources/{id}/blocks",
+        "description": "Closed date ranges (local dates, inclusive). Read-only tokens may GET. Served by STORE tenants only (also the offer profile).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "date_from": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "date_to": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "note": {
+                            "type": "string",
+                            "maxLength": 200
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body (error invalid_body, invalid_field with `field`, invalid_hours)."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Unknown resource (error not_found)."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "POST /api/v1/booking/resources/{id}/blocks",
+        "description": "Close a date range. Real calendar dates, date_to >= date_from, note at most 200 characters (400 `invalid_field`). Read-only tokens may GET. Served by STORE tenants only (also the offer profile).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "block": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "date_from": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "date_to": {
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "note": {
+                          "type": "string",
+                          "maxLength": 200
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body (error invalid_body, invalid_field with `field`, invalid_hours)."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Unknown resource (error not_found)."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "date_from",
+                  "date_to"
+                ],
+                "properties": {
+                  "date_from": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "date_to": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/booking/resources/{id}/blocks/{blockId}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "blockId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "delete": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "DELETE /api/v1/booking/resources/{id}/blocks/{blockId}",
+        "description": "Remove a closed range. Read-only tokens may GET. Served by STORE tenants only (also the offer profile).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Invalid body (error invalid_body, invalid_field with `field`, invalid_hours)."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Unknown resource (error not_found)."
+          }
+        }
+      }
+    },
+    "/api/v1/booking/resources/{id}/slots": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/booking/resources/{id}/slots",
+        "description": "The owner's free slots of one bookable service (resource), in the store's timezone, for picking a booking's new time (PATCH /api/v1/bookings/{id} with starts_at). Unlike GET /api/shop/booking/slots it applies no minimum notice (a move waives it) and no shopper visibility rule (a draft or hidden service is listed too). Past slots, opening hours, closed dates, the booking horizon and capacity still apply; capacity counts every live booking, including the one you are about to move (the move itself does not count it). to - from is at most 31 days. Read-only tokens may GET. Served by STORE tenants only (also the offer profile).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The free slots, oldest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "timezone": {
+                      "type": "string"
+                    },
+                    "slots": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "starts_at": {
+                            "type": "integer"
+                          },
+                          "ends_at": {
+                            "type": "integer"
+                          },
+                          "remaining": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_range (bad or reversed dates) or range_too_long (over 31 days)."
+          },
+          "404": {
+            "description": "not_found: no such resource."
+          }
+        }
+      }
+    },
+    "/api/shop/booking/slots": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/shop/booking/slots",
+        "description": "Free slots of a bookable service, in the store's timezone. product may be a variant id (it books against its parent). to - from is at most 31 days. Runs the lazy expiry of unpaid orders first, so an expired hold frees its slot. No authentication; per-IP rate limited (60 per 5 minutes); never cached.",
+        "parameters": [
+          {
+            "name": "product",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The offered slots, oldest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "timezone": {
+                      "type": "string"
+                    },
+                    "slots": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "starts_at": {
+                            "type": "integer"
+                          },
+                          "ends_at": {
+                            "type": "integer"
+                          },
+                          "remaining": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_range (bad or reversed dates) or range_too_long (over 31 days)."
+          },
+          "404": {
+            "description": "product_not_found: unknown, not sellable or not bookable."
+          },
+          "429": {
+            "description": "Rate limited."
+          }
+        }
+      }
+    },
+    "/api/v1/bookings": {
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/bookings",
+        "description": "Bookings of bookable services with start in [from, to] (store-local dates, at most 62 days inclusive), ordered by starts_at. No customer name or email; follow order_id. Read-only tokens may GET. Served by STORE tenants only (also the offer profile).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "resource",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "held",
+                "confirmed",
+                "released"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "timezone": {
+                      "type": "string"
+                    },
+                    "bookings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "resource_id": {
+                            "type": "integer"
+                          },
+                          "product_id": {
+                            "type": "integer"
+                          },
+                          "product_name": {
+                            "type": "string"
+                          },
+                          "order_id": {
+                            "type": "integer"
+                          },
+                          "order_status": {
+                            "type": "string"
+                          },
+                          "starts_at": {
+                            "type": "integer",
+                            "description": "UTC epoch seconds"
+                          },
+                          "ends_at": {
+                            "type": "integer"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "held",
+                              "confirmed",
+                              "released"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_range, invalid_status or invalid_resource."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/v1/bookings/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "GET /api/v1/bookings/{id}",
+        "description": "One booking. Read-only tokens may GET. Served by STORE tenants only (also the offer profile).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "booking": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "resource_id": {
+                          "type": "integer"
+                        },
+                        "product_id": {
+                          "type": "integer"
+                        },
+                        "product_name": {
+                          "type": "string"
+                        },
+                        "order_id": {
+                          "type": "integer"
+                        },
+                        "order_status": {
+                          "type": "string"
+                        },
+                        "starts_at": {
+                          "type": "integer",
+                          "description": "UTC epoch seconds"
+                        },
+                        "ends_at": {
+                          "type": "integer"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "held",
+                            "confirmed",
+                            "released"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Unknown booking (error not_found)."
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Store"
+        ],
+        "summary": "PATCH /api/v1/bookings/{id}",
+        "description": "Send `{action:'cancel'}` to release the booking (the order is unchanged; refund from the order) or `{starts_at}` (UTC epoch seconds) to move it to another slot of the same resource: the new booking keeps the old one's status, the old one is released, and the response is the new booking. Moving ignores the notice window but not hours, blocked dates, past or the horizon. 400 invalid_body, 409 already_released, booking_changed (its status changed while the move ran, e.g. a payment landed; read it again), slot_taken (slot full) or slot_unavailable (closed, blocked, past, off the slot grid). Read-only tokens may not PATCH. Served by STORE tenants only (also the offer profile).",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "cancel"
+                    ]
+                  },
+                  "starts_at": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "booking": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "integer"
+                        },
+                        "resource_id": {
+                          "type": "integer"
+                        },
+                        "product_id": {
+                          "type": "integer"
+                        },
+                        "product_name": {
+                          "type": "string"
+                        },
+                        "order_id": {
+                          "type": "integer"
+                        },
+                        "order_status": {
+                          "type": "string"
+                        },
+                        "starts_at": {
+                          "type": "integer",
+                          "description": "UTC epoch seconds"
+                        },
+                        "ends_at": {
+                          "type": "integer"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "held",
+                            "confirmed",
+                            "released"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_body."
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Unknown booking (error not_found)."
+          },
+          "409": {
+            "description": "already_released, booking_changed, slot_taken or slot_unavailable."
           }
         }
       }

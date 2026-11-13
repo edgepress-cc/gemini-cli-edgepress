@@ -71,3 +71,9 @@ at session start and refuse writes up front when it is `true`.
   set a password directly.
 - Deactivating vs deleting: prefer PATCHing `status` over destructive
   deletes so content attribution survives.
+- **EdgePress-account users are not managed here.** A user with an
+  `account_id` (the site owner, collaborators) cannot have `role`, `status` or
+  `email` changed, or be deleted, through the tenant API (400/403). Their access
+  is granted and removed under Collaborators at app.edgepress.cc — tell the
+  user that instead of retrying. `admin` is never assignable here; a site-only
+  user's role is one of editor/author/columnist/contributor/subscriber.
